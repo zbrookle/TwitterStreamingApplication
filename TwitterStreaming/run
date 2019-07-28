@@ -1,0 +1,3 @@
+spark-submit \
+   --class com.twitter.spark.twitterstreaming.TwitterStreaming \
+   --master local target/scala-2.11/twitterstreaming_2.11-1.0.jar
