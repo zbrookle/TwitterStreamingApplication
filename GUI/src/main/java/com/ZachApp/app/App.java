@@ -4,40 +4,34 @@ import twitter4j.*;
 import twitter4j.conf.ConfigurationBuilder;
 import java.util.*;
 
-class TwitterData {
-  TwitterFactory twitterFactory;
-  Twitter twitter;
-  public String[] HEADERS  = {"UserID",
-                              "created_at",
-                              "TextRangeStart",
-                              "TextRangeEnd",
-                              "FavoriteCount",
-                              "Language",
-                              "Place",
-                              "RetweetCount",
-                              "Text",
-                              "WithheldInCountries",
-                              "isRetweet"};
+class TwitterDataStream {
+  TwitterStream twitterStream;
+  StatusListener listener;
 
-  TwitterData() {
-    // Get instance of twitter
-    twitterFactory = new TwitterFactory();
-    twitter = twitterFactory.getInstance();
-  }
+  TwitterDataStream() {
+    // Initialize the stream instance
+    twitterStream = new TwitterStreamFactory().getInstance();
 
-  public void getTweets(String input_query) {
-    // Create list to place tweets into
-    ArrayList<ArrayList> tweetData = new ArrayList<ArrayList>();
+    // Set up the listener
+    listener = new StatusListener () {
+      // Create place to store data
+      ArrayList<ArrayList> tweetData = new ArrayList<ArrayList>();
+      String[] HEADERS = {"UserID",
+                          "created_at",
+                          "TextRangeStart",
+                          "TextRangeEnd",
+                          "FavoriteCount",
+                          "Language",
+                          "Place",
+                          "RetweetCount",
+                          "Text",
+                          "WithheldInCountries",
+                          "isRetweet"};
 
-    // Query data
-    Query query = new Query(input_query);
-    try {
-      QueryResult result = twitter.search(query);
+      public void onStatus(final Status status) {
 
-      ArrayList row;
-      for (final Status status : result.getTweets()) {
-          // Get the data
-          row = new ArrayList() {{
+          // Arrange data in a list
+          ArrayList row = new ArrayList() {{
                                   add(status.getUser().getId());
                                   add(status.getCreatedAt());
                                   add(status.getCreatedAt());
@@ -51,18 +45,37 @@ class TwitterData {
                                   add(status.getWithheldInCountries());
                                   add(status.isRetweet());
                                 }};
+          // Write data out to a CSV file with the appropriate headers
+
           tweetData.add(row);
+          System.out.println(row);
       }
-    } catch (TwitterException name) {
-        System.out.println("You don't have internet connection.");
-    }
-    System.out.println(tweetData);
+      public void onDeletionNotice(StatusDeletionNotice statusDeletionNotice) {}
+      public void onTrackLimitationNotice(int numberOfLimitedStatuses) {}
+      public void onException(Exception ex) {
+          ex.printStackTrace();
+      }
+      public void onStallWarning(StallWarning arg0) {}
+      public void onScrubGeo(long arg0,long arg1) {}
+    };
+
+    // Add the listener
+    twitterStream.addListener(listener);
+  }
+
+  public void StreamData(String[] keywords) {
+    FilterQuery tweetFilterQuery = new FilterQuery();
+    tweetFilterQuery.track(keywords);
+
+    twitterStream.filter(tweetFilterQuery);
   }
 }
 
 public class App {
   public static void main(String[] args) {
-    TwitterData myTwitter = new TwitterData();
-    myTwitter.getTweets("Harry Potter");
+    // TwitterData myTwitter = new TwitterData();
+    TwitterDataStream myStream = new TwitterDataStream();
+    String[] words = new String[]{"Harry Potter", "Hunter X Hunter"};
+    myStream.StreamData(words);
   }
 }
