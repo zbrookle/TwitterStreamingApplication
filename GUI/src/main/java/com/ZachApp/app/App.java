@@ -2,10 +2,22 @@ package com.ZachApp.app;
 
 import twitter4j.*;
 import twitter4j.conf.ConfigurationBuilder;
+import java.util.*;
 
 class TwitterData {
-  twitter4j.TwitterFactory twitterFactory;
-  twitter4j.Twitter twitter;
+  TwitterFactory twitterFactory;
+  Twitter twitter;
+  public String[] HEADERS  = {"UserID",
+                              "created_at",
+                              "TextRangeStart",
+                              "TextRangeEnd",
+                              "FavoriteCount",
+                              "Language",
+                              "Place",
+                              "RetweetCount",
+                              "Text",
+                              "WithheldInCountries",
+                              "isRetweet"};
 
   TwitterData() {
     // Get instance of twitter
@@ -14,20 +26,37 @@ class TwitterData {
   }
 
   public void getTweets(String input_query) {
+    // Create list to place tweets into
+    ArrayList<ArrayList> tweetData = new ArrayList<ArrayList>();
+
     // Query data
     Query query = new Query(input_query);
     try {
       QueryResult result = twitter.search(query);
 
-      // Display data
-      int tweetcount = result.getCount();
-      System.out.println(tweetcount);
-      for (Status status : result.getTweets()) {
-          System.out.println("@" + status.getUser().getScreenName() + ":" + status.getText());
+      ArrayList row;
+      for (final Status status : result.getTweets()) {
+          // Get the data
+          row = new ArrayList() {{
+                                  add(status.getUser().getId());
+                                  add(status.getCreatedAt());
+                                  add(status.getCreatedAt());
+                                  add(status.getDisplayTextRangeStart());
+                                  add(status.getDisplayTextRangeEnd());
+                                  add(status.getFavoriteCount());
+                                  add(status.getLang());
+                                  add(status.getPlace());
+                                  add(status.getRetweetCount());
+                                  add(status.getText());
+                                  add(status.getWithheldInCountries());
+                                  add(status.isRetweet());
+                                }};
+          tweetData.add(row);
       }
     } catch (TwitterException name) {
         System.out.println("You don't have internet connection.");
     }
+    System.out.println(tweetData);
   }
 }
 
