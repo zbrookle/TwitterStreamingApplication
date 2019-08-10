@@ -1,5 +1,14 @@
 package com.ZachApp.app;
 
+// JavaSwing packages
+import javafx.application.Application;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.stage.Stage;
+import javafx.scene.layout.GridPane;
+
 // Twitter packages
 import twitter4j.*;
 import twitter4j.conf.ConfigurationBuilder;
@@ -182,18 +191,56 @@ class SparkStreamer {
   }
 }
 
-public class App {
-  public static void main(String[] args) {
-    TwitterDataStream myStream = new TwitterDataStream();
-    String[] words = new String[]{"Harry Potter"};
-    myStream.StreamData(words);
-    SparkStreamer ss;
-    try {
-      ss = new SparkStreamer();
-    } catch (StreamingQueryException e) {
-      System.out.println("Stream exception!");
-    }
+public class App extends Application{
+  // public static void main(String[] args) {
 
-    // Delete files from stream when done
+  //
+  //   // Delete files from stream when done
+  //
+  //   // Start Application
+  //   new Hello_World();
+  //
+  // }
+
+  @Override
+  public void start(Stage primaryStage) throws Exception {
+    // Create a root pane
+    GridPane root = new GridPane();
+
+    Label keywordsLabel = new Label("Please enter keywords");
+    root.addRow(0, keywordsLabel); // Add instructions
+
+    final TextField keywordsInput = new TextField();
+    root.addRow(1, keywordsInput);  // Add text field for key words
+
+    // Set up button that will Initialize the twitter feed analysis
+    Button startFeed = new Button("Start Twitter Feed");
+    startFeed.setOnAction(new EventHandler<ActionEvent>() {
+        @Override
+        public void handle(ActionEvent arg0) {
+          TwitterDataStream myStream = new TwitterDataStream();
+          String[] words = new String[]{keywordsInput.getText()};
+          myStream.StreamData(words);
+          SparkStreamer ss;
+          try {
+            ss = new SparkStreamer();
+          } catch (StreamingQueryException e) {
+            System.out.println("Stream exception!");
+          }
+        }
+    });
+    root.addRow(2, startFeed); // Add the start button
+
+    // Set the scene
+    Scene scene=new Scene(root,600,400);
+    primaryStage.setScene(scene);
+
+    primaryStage.setTitle("Twitter Stream"); // Set the title
+    primaryStage.show(); // Show app
+  }
+
+  public static void main (String[] args)
+  {
+      launch(args);
   }
 }
