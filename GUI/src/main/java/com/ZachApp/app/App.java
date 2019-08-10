@@ -6,8 +6,11 @@ import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.stage.Stage;
+import javafx.stage.*;
 import javafx.scene.layout.GridPane;
+import javafx.geometry.Rectangle2D;
+import javafx.geometry.Orientation;
+import javafx.scene.chart.*;;
 
 // Twitter packages
 import twitter4j.*;
@@ -191,6 +194,11 @@ class SparkStreamer {
   }
 }
 
+class tweet {
+  String tweet_text;
+
+}
+
 public class App extends Application{
   // public static void main(String[] args) {
 
@@ -201,17 +209,27 @@ public class App extends Application{
   //   new Hello_World();
   //
   // }
+  private SparkStreamer sparkTweets;
 
   @Override
   public void start(Stage primaryStage) throws Exception {
     // Create a root pane
     GridPane root = new GridPane();
 
+    // Interface Column
+    GridPane inputPane = new GridPane();
+    // Get screen bounds
+    Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
+    double xPos = screenBounds.getMinX();
+    double yPos = screenBounds.getMinY();
+    double screenWidth = screenBounds.getWidth();
+    double screenHeight = screenBounds.getHeight();
+
     Label keywordsLabel = new Label("Please enter keywords");
-    root.addRow(0, keywordsLabel); // Add instructions
+    inputPane.addRow(0, keywordsLabel); // Add instructions
 
     final TextField keywordsInput = new TextField();
-    root.addRow(1, keywordsInput);  // Add text field for key words
+    inputPane.addRow(1, keywordsInput);  // Add text field for key words
 
     // Set up button that will Initialize the twitter feed analysis
     Button startFeed = new Button("Start Twitter Feed");
@@ -221,19 +239,46 @@ public class App extends Application{
           TwitterDataStream myStream = new TwitterDataStream();
           String[] words = new String[]{keywordsInput.getText()};
           myStream.StreamData(words);
-          SparkStreamer ss;
           try {
-            ss = new SparkStreamer();
+            sparkTweets = new SparkStreamer();
           } catch (StreamingQueryException e) {
             System.out.println("Stream exception!");
           }
         }
     });
-    root.addRow(2, startFeed); // Add the start button
+    inputPane.addRow(2, startFeed); // Add the start button
+
+    // Chart column
+    GridPane chartPane = new GridPane();
+    PieChart piechart = new PieChart(); // Create Pie chart
+    chartPane.addRow(0, piechart); // Add pie chart
+    // StackedBarChart barchart = new StackedBarChart(22);
+    // chartPane.addRow(1, barchart);
+
+    // Twitter feed column
+    GridPane twitterFeedPane = new GridPane();
+    twitterFeedPane.setMinWidth(screenWidth/3);
+    twitterFeedPane.setMaxWidth(screenWidth/3);
+    twitterFeedPane.setMinHeight(screenHeight);
+    twitterFeedPane.setMaxHeight(screenHeight);
+    ScrollBar feedScrollBar = new ScrollBar();
+    feedScrollBar.setOrientation(Orientation.VERTICAL);
+    twitterFeedPane.getChildren().add(feedScrollBar);
+
+    // Add panes to the root
+    root.addColumn(0, inputPane);
+    root.addColumn(1, chartPane);
+    root.addColumn(2, twitterFeedPane);
 
     // Set the scene
-    Scene scene=new Scene(root,600,400);
+    Scene scene = new Scene(root, screenWidth, screenHeight);
     primaryStage.setScene(scene);
+
+    // Set stage to full screen
+    primaryStage.setX(xPos);
+    primaryStage.setY(yPos);
+    primaryStage.setWidth(screenWidth);
+    primaryStage.setHeight(screenHeight);
 
     primaryStage.setTitle("Twitter Stream"); // Set the title
     primaryStage.show(); // Show app

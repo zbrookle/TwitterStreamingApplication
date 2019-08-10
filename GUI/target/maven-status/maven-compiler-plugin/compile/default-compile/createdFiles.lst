@@ -1,6 +1,7 @@
 com/ZachApp/app/TwitterDataStream.class
 com/ZachApp/app/TwitterDataStream$1.class
 com/ZachApp/app/TwitterDataStream$1$2.class
+com/ZachApp/app/tweet.class
 com/ZachApp/app/SparkStreamer.class
 com/ZachApp/app/App$1.class
 com/ZachApp/app/App.class
