@@ -10,11 +10,13 @@ import javafx.scene.control.Button;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Label;
+import javafx.scene.control.Control;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
 import javafx.scene.chart.PieChart;
 import javafx.scene.text.Text;
+import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
 import javafx.geometry.Orientation;
 import javafx.beans.property.StringProperty;
@@ -128,9 +130,8 @@ class TwitterDataStream {
                                   }};
           }
 
-          // Add the tweet to the interface
-          // TODO change the value of the tweettext atomic AtomicReference
-          currentTweetText.set(status.getText());
+          // Change the text of the current tweet
+          currentTweetText.set(status.getUser().getName() + ":" + status.getText());
 
           // Create the csv file to write to
           try {
@@ -267,11 +268,6 @@ class SparkStreamer {
  * visuals such as graphs. It is implemented using JavaFX.
  */
 public class App extends Application {
-  /**
-    * Variable to store the app's twitter feed visual.
-    */
-  GridPane twitterFeedPane;
-
   int tweetCount;
 
   @Override
@@ -284,22 +280,38 @@ public class App extends Application {
 
     // Get screen bounds
     Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
-    double xPos = screenBounds.getMinX();
-    double yPos = screenBounds.getMinY();
-    double screenWidth = screenBounds.getWidth();
-    double screenHeight = screenBounds.getHeight();
+    final double xPos = screenBounds.getMinX();
+    final double yPos = screenBounds.getMinY();
+    final double screenWidth = screenBounds.getWidth();
+    final double screenHeight = screenBounds.getHeight() - screenBounds.getHeight() / 100;
+    final double columnWidth = screenWidth / 3;
 
-    // Chart column
+    /* Chart column */
     GridPane chartPane = new GridPane();
     PieChart piechart = new PieChart(); // Create Pie chart
     chartPane.addRow(0, piechart); // Add pie chart
     // StackedBarChart barchart = new StackedBarChart(22);
     // chartPane.addRow(1, barchart);
+    chartPane.setPrefSize(screenWidth / 3, screenHeight);
+    chartPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    chartPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
 
-    // Twitter feed column
-    twitterFeedPane = new GridPane();
-    twitterFeedPane.setMinSize(screenWidth / 3, screenHeight);
-    twitterFeedPane.setMaxSize(screenWidth / 3, screenHeight);
+    /* Twitter feed column */
+    // Set content pane
+    final GridPane twitterFeedPane = new GridPane();
+    twitterFeedPane.setPrefSize(screenWidth / 3, screenHeight);
+    twitterFeedPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    twitterFeedPane.setMaxWidth(Control.USE_PREF_SIZE);
+    twitterFeedPane.setMaxHeight(Region.USE_COMPUTED_SIZE);
+
+    // Set scrolling pane
+    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
+    feedScrollPane.setPrefSize(screenWidth / 3, screenHeight);
+    feedScrollPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    feedScrollPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+    feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+
     tweetCount = 0; // Variable to keep track of tweet row
     final Model model = new Model();
     model.stringProperty().addListener(new ChangeListener<String>() {
@@ -310,8 +322,15 @@ public class App extends Application {
           Platform.runLater(new Runnable() {
             @Override
             public void run() {
+              double tweetBoxHeight = screenHeight / 12;
+              if (tweetCount > 10) {
+                twitterFeedPane.setPrefHeight(twitterFeedPane.getPrefHeight() + screenHeight / 12);
+              }
               Label tweetTextVisual = new Label(newValue.toString());
-              Label.setWrapText(true);
+              tweetTextVisual.setWrapText(true);
+              tweetTextVisual.setPrefSize(columnWidth, tweetBoxHeight);
+              tweetTextVisual.setMinWidth(Control.USE_PREF_SIZE);
+              tweetTextVisual.setMaxWidth(Control.USE_PREF_SIZE);
               twitterFeedPane.addRow(tweetCount, tweetTextVisual);
               tweetCount++;
               String value = tweetText.getAndSet("");
@@ -321,10 +340,6 @@ public class App extends Application {
 
       }
     });
-    anchorPane.setPrefSize(screenWidth/3, screenHeight)
-    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
-    feedScrollPane.setPrefViewportWidth(screenWidth / 3);
-    feedScrollPane.setPrefViewportHeight(screenHeight);
 
     // Interface Column
     GridPane inputPane = new GridPane();
@@ -336,16 +351,25 @@ public class App extends Application {
     inputPane.addRow(1, keywordsInput);  // Add text field for key words
 
     // Set up button that will Initialize the twitter feed analysis
-    Button startFeed = new Button("Start Twitter Feed");
+    final Button startFeed = new Button("Start Twitter Feed");
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
           String[] words = new String[]{keywordsInput.getText()};
+          startFeed.setDisable(true);
           model.setKeywords(words);
           model.start();
         }
     });
     inputPane.addRow(2, startFeed); // Add the start button
+    inputPane.setPrefSize(screenWidth / 3, screenHeight);
+    inputPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    inputPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+
+    // TODO Still need to add button that will terminate the stream
+
+
+    // TODO Still need to add in a menu for the top bar
 
     // Add panes to the root
     root.addColumn(0, inputPane);
@@ -398,7 +422,6 @@ public class App extends Application {
 
     @Override
     public void start() {
-      System.out.println((String)Array.get(keywords, 0));
       TwitterDataStream myStream = new TwitterDataStream(stringProperty);
       myStream.streamData(keywords);
       // try {
