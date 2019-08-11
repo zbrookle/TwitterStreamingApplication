@@ -15,10 +15,8 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
 import javafx.scene.chart.PieChart;
-import javafx.scene.text.Text;
 import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
-import javafx.geometry.Orientation;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
@@ -36,7 +34,6 @@ import twitter4j.StallWarning;
 
 // Java packages
 import java.util.ArrayList;
-import java.lang.reflect.Array;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -268,7 +265,11 @@ class SparkStreamer {
  * visuals such as graphs. It is implemented using JavaFX.
  */
 public class App extends Application {
-  int tweetCount;
+  /**
+    * Keeps track of the number of tweets that have been added to the visual
+    * feed.
+    */
+  private int tweetCount;
 
   @Override
   public void start(final Stage primaryStage) throws Exception {
@@ -391,9 +392,12 @@ public class App extends Application {
   }
 
   /**
-    * Model handles the interaction between Spark and the front end
+    * Model handles the interaction between Spark and the front end.
     */
   public class Model extends Thread {
+    /**
+      * Wrapper for the text of the tweet.
+      */
     private StringProperty stringProperty;
 
     /**
@@ -401,22 +405,40 @@ public class App extends Application {
       */
     private SparkStreamer sparkTweets;
 
-    private String [] keywords;
+    /**
+      * An array of words that will be passed to twitter4j to get tweets.
+      */
+    private String[] keywords;
 
+    /**
+      * Constructor for model.
+      */
     public Model() {
       stringProperty = new SimpleStringProperty(this, "int", "");
       setDaemon(true);
     }
 
+    /**
+      * Get method for string of stirngProperty.
+      * @return stringProperty
+      */
     public String getString() {
       return stringProperty.get();
     }
 
+    /**
+      * Get method for stringProperty.
+      * @return stringProperty
+      */
     public StringProperty stringProperty() {
       return stringProperty;
     }
 
-    public void setKeywords(String [] inputWords) {
+    /**
+      * Method for setting the key words that will be given to twitter.
+      * @param inputWords is the list of words that will go to twitter
+      */
+    public void setKeywords(final String[] inputWords) {
       keywords = inputWords;
     }
 
@@ -434,6 +456,7 @@ public class App extends Application {
 
   /**
     * Starts the program.
+    * @param args is the args
     */
   public static void main(final String[] args) {
       launch(args);
