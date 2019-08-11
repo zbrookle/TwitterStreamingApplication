@@ -2,20 +2,25 @@ package com.ZachApp.app;
 
 // JavaFX packages
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.TextField;
-import javafx.scene.control.ScrollBar;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Label;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
-import javafx.geometry.Rectangle2D;
-import javafx.geometry.Orientation;
 import javafx.scene.chart.PieChart;
 import javafx.scene.text.Text;
+import javafx.geometry.Rectangle2D;
+import javafx.geometry.Orientation;
+import javafx.beans.property.StringProperty;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import java.util.concurrent.atomic.AtomicReference;
 
 // Twitter packages
@@ -29,6 +34,7 @@ import twitter4j.StallWarning;
 
 // Java packages
 import java.util.ArrayList;
+import java.lang.reflect.Array;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -76,19 +82,13 @@ class TwitterDataStream {
   private int partition;
 
   /**
-    * Tracks the number of tweets that have been streamed.
-    */
-  private int tweetCount;
-
-  /**
     * Constructor for the datastream class.
-    * @param twitterFeedVisual is the GUI visual for the twitter feed
+    * @param currentTweetText is text of the current tweet
     */
-  TwitterDataStream(final GridPane twitterFeedVisual) {
+  TwitterDataStream(final StringProperty currentTweetText) {
     // Initialize the stream instance
     twitterStream = new TwitterStreamFactory().getInstance();
     partition = 0;
-    tweetCount = 0;
 
     // Set up the listener
     StatusListener listener = new StatusListener() {
@@ -129,8 +129,8 @@ class TwitterDataStream {
           }
 
           // Add the tweet to the interface
-          Text tweetText = new Text(status.getText());
-          twitterFeedVisual.addRow(tweetCount, tweetText);
+          // TODO change the value of the tweettext atomic AtomicReference
+          currentTweetText.set(status.getText());
 
           // Create the csv file to write to
           try {
@@ -258,65 +258,76 @@ class SparkStreamer {
       .format("console")
       .start();
 
-    //System.out.println(query.status());
-
-    query.awaitTermination();
+    //query.awaitTermination();
   }
 }
-
-// public class Model extends Thread {
-//   private IntegerProperty intProperty;
-//
-//   public Model() {
-//     intProperty = new SimpleIntegerProperty(this, "int", 0);
-//     setDaemon(true);
-//   }
-//
-//   public int getInt() {
-//     return intProperty.get();
-//   }
-//
-//   public IntegerProperty intProperty() {
-//     return intProperty;
-//   }
-//
-//   @Override
-//   public void run() {
-//     while (true) {
-//       intProperty.set(intProperty.get() + 1);
-//     }
-//   }
-// }
 
 /**
  * App is the user interface and main class. It encompasses user input and
  * visuals such as graphs. It is implemented using JavaFX.
  */
 public class App extends Application {
-
-  /**
-    * Variable to store the app's instance of the spark streamer.
-    */
-  private SparkStreamer sparkTweets;
-
   /**
     * Variable to store the app's twitter feed visual.
     */
   GridPane twitterFeedPane;
+
+  int tweetCount;
 
   @Override
   public void start(final Stage primaryStage) throws Exception {
     // Create a root pane
     GridPane root = new GridPane();
 
-    // Interface Column
-    GridPane inputPane = new GridPane();
+    // Create an AtomicReference with a string to pass tweets between front and back end
+    final AtomicReference<String> tweetText = new AtomicReference("");
+
     // Get screen bounds
     Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
     double xPos = screenBounds.getMinX();
     double yPos = screenBounds.getMinY();
     double screenWidth = screenBounds.getWidth();
     double screenHeight = screenBounds.getHeight();
+
+    // Chart column
+    GridPane chartPane = new GridPane();
+    PieChart piechart = new PieChart(); // Create Pie chart
+    chartPane.addRow(0, piechart); // Add pie chart
+    // StackedBarChart barchart = new StackedBarChart(22);
+    // chartPane.addRow(1, barchart);
+
+    // Twitter feed column
+    twitterFeedPane = new GridPane();
+    twitterFeedPane.setMinSize(screenWidth / 3, screenHeight);
+    twitterFeedPane.setMaxSize(screenWidth / 3, screenHeight);
+    tweetCount = 0; // Variable to keep track of tweet row
+    final Model model = new Model();
+    model.stringProperty().addListener(new ChangeListener<String>() {
+      @Override
+      public void changed(final ObservableValue<? extends String> observable,
+          final String oldValue, final String newValue) {
+        if (tweetText.getAndSet(newValue.toString()) != "") {
+          Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+              Label tweetTextVisual = new Label(newValue.toString());
+              Label.setWrapText(true);
+              twitterFeedPane.addRow(tweetCount, tweetTextVisual);
+              tweetCount++;
+              String value = tweetText.getAndSet("");
+            }
+          });
+        }
+
+      }
+    });
+    anchorPane.setPrefSize(screenWidth/3, screenHeight)
+    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
+    feedScrollPane.setPrefViewportWidth(screenWidth / 3);
+    feedScrollPane.setPrefViewportHeight(screenHeight);
+
+    // Interface Column
+    GridPane inputPane = new GridPane();
 
     Label keywordsLabel = new Label("Please enter keywords");
     inputPane.addRow(0, keywordsLabel); // Add instructions
@@ -329,39 +340,17 @@ public class App extends Application {
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
-          TwitterDataStream myStream = new TwitterDataStream(twitterFeedPane);
           String[] words = new String[]{keywordsInput.getText()};
-          myStream.streamData(words);
-          try {
-            sparkTweets = new SparkStreamer();
-          } catch (StreamingQueryException e) {
-            System.out.println("Stream exception!");
-          }
+          model.setKeywords(words);
+          model.start();
         }
     });
     inputPane.addRow(2, startFeed); // Add the start button
 
-    // Chart column
-    GridPane chartPane = new GridPane();
-    PieChart piechart = new PieChart(); // Create Pie chart
-    chartPane.addRow(0, piechart); // Add pie chart
-    // StackedBarChart barchart = new StackedBarChart(22);
-    // chartPane.addRow(1, barchart);
-
-    // Twitter feed column
-    twitterFeedPane = new GridPane();
-    twitterFeedPane.setMinWidth(screenWidth / 3);
-    twitterFeedPane.setMaxWidth(screenWidth / 3);
-    twitterFeedPane.setMinHeight(screenHeight);
-    twitterFeedPane.setMaxHeight(screenHeight);
-    ScrollBar feedScrollBar = new ScrollBar();
-    feedScrollBar.setOrientation(Orientation.VERTICAL);
-    twitterFeedPane.getChildren().add(feedScrollBar);
-
     // Add panes to the root
     root.addColumn(0, inputPane);
     root.addColumn(1, chartPane);
-    root.addColumn(2, twitterFeedPane);
+    root.addColumn(2, feedScrollPane);
 
     // Set the scene
     Scene scene = new Scene(root, screenWidth, screenHeight);
@@ -375,6 +364,49 @@ public class App extends Application {
 
     primaryStage.setTitle("Twitter Stream"); // Set the title
     primaryStage.show(); // Show app
+  }
+
+  /**
+    * Model handles the interaction between Spark and the front end
+    */
+  public class Model extends Thread {
+    private StringProperty stringProperty;
+
+    /**
+      * Variable to store the app's instance of the spark streamer.
+      */
+    private SparkStreamer sparkTweets;
+
+    private String [] keywords;
+
+    public Model() {
+      stringProperty = new SimpleStringProperty(this, "int", "");
+      setDaemon(true);
+    }
+
+    public String getString() {
+      return stringProperty.get();
+    }
+
+    public StringProperty stringProperty() {
+      return stringProperty;
+    }
+
+    public void setKeywords(String [] inputWords) {
+      keywords = inputWords;
+    }
+
+    @Override
+    public void start() {
+      System.out.println((String)Array.get(keywords, 0));
+      TwitterDataStream myStream = new TwitterDataStream(stringProperty);
+      myStream.streamData(keywords);
+      // try {
+      //   sparkTweets = new SparkStreamer();
+      // } catch (StreamingQueryException e) {
+      //   System.out.println("Stream exception!");
+      // }
+    }
   }
 
   /**
