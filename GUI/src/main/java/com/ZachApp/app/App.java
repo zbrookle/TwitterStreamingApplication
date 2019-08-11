@@ -10,7 +10,9 @@ import javafx.stage.*;
 import javafx.scene.layout.GridPane;
 import javafx.geometry.Rectangle2D;
 import javafx.geometry.Orientation;
-import javafx.scene.chart.*;;
+import javafx.scene.chart.*;
+import javafx.scene.text.Text;
+import java.util.concurrent.atomic.AtomicReference;
 
 // Twitter packages
 import twitter4j.*;
@@ -42,11 +44,13 @@ class TwitterDataStream {
   BufferedWriter writer;
   CSVPrinter csvPrinter;
   int i;
+  int tweetCount;
 
-  TwitterDataStream() {
+  TwitterDataStream(final GridPane twitterFeedVisual) {
     // Initialize the stream instance
     twitterStream = new TwitterStreamFactory().getInstance();
     i = 0;
+    tweetCount = 0;
 
     // Set up the listener
     listener = new StatusListener() {
@@ -56,6 +60,7 @@ class TwitterDataStream {
           ArrayList row;
           try {
             row = new ArrayList() {{
+                                    add(status.getUser().getName());
                                     add(status.getUser().getId());
                                     add(status.getCreatedAt());
                                     add(status.getDisplayTextRangeStart());
@@ -66,11 +71,11 @@ class TwitterDataStream {
                                     add(status.getPlace().getGeometryCoordinates().toString());
                                     add(status.getRetweetCount());
                                     add(status.getText());
-                                    //add(status.getWithheldInCountries());
                                     add(status.isRetweet());
                                   }};
           } catch (NullPointerException e) {
             row = new ArrayList() {{
+                                    add(status.getUser().getName());
                                     add(status.getUser().getId());
                                     add(status.getCreatedAt());
                                     add(status.getDisplayTextRangeStart());
@@ -86,11 +91,16 @@ class TwitterDataStream {
                                   }};
           }
 
+          // Add the tweet to the interface
+          Text tweet_text = new Text(status.getText());
+          twitterFeedVisual.addRow(tweetCount, tweet_text);
+
           // Create the csv file to write to
           try {
             writer = Files.newBufferedWriter(Paths.get("stream/data-" + Integer.toString(i) + ".csv"));
             csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT
-                            .withHeader("UserID",
+                            .withHeader("UserName",
+                                        "UserID",
                                         "created_at",
                                         "TextRangeStart",
                                         "TextRangeEnd",
@@ -100,7 +110,6 @@ class TwitterDataStream {
                                         "Coordinates",
                                         "RetweetCount",
                                         "Text",
-                                        //"WithheldInCountries",
                                         "isRetweet"));
             i++;
           } catch (IOException e) {
@@ -194,10 +203,29 @@ class SparkStreamer {
   }
 }
 
-class tweet {
-  String tweet_text;
-
-}
+// public class Model extends Thread {
+//   private IntegerProperty intProperty;
+//
+//   public Model() {
+//     intProperty = new SimpleIntegerProperty(this, "int", 0);
+//     setDaemon(true);
+//   }
+//
+//   public int getInt() {
+//     return intProperty.get();
+//   }
+//
+//   public IntegerProperty intProperty() {
+//     return intProperty;
+//   }
+//
+//   @Override
+//   public void run() {
+//     while (true) {
+//       intProperty.set(intProperty.get() + 1);
+//     }
+//   }
+// }
 
 public class App extends Application{
   // public static void main(String[] args) {
@@ -210,6 +238,7 @@ public class App extends Application{
   //
   // }
   private SparkStreamer sparkTweets;
+  GridPane twitterFeedPane;
 
   @Override
   public void start(Stage primaryStage) throws Exception {
@@ -236,7 +265,7 @@ public class App extends Application{
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(ActionEvent arg0) {
-          TwitterDataStream myStream = new TwitterDataStream();
+          TwitterDataStream myStream = new TwitterDataStream(twitterFeedPane);
           String[] words = new String[]{keywordsInput.getText()};
           myStream.StreamData(words);
           try {
@@ -256,7 +285,7 @@ public class App extends Application{
     // chartPane.addRow(1, barchart);
 
     // Twitter feed column
-    GridPane twitterFeedPane = new GridPane();
+    twitterFeedPane = new GridPane();
     twitterFeedPane.setMinWidth(screenWidth/3);
     twitterFeedPane.setMaxWidth(screenWidth/3);
     twitterFeedPane.setMinHeight(screenHeight);
