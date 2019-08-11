@@ -35,12 +35,6 @@
 
   <dependencies>
     <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.11</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
        <groupId>org.twitter4j</groupId>
        <artifactId>twitter4j-core</artifactId>
        <version>[4.0,)</version>
@@ -57,23 +51,8 @@
     </dependency>
     <dependency>
       <groupId>org.apache.spark</groupId>
-      <artifactId>spark-streaming_2.12</artifactId>
-      <version>${spark.version}</version>
-    </dependency>
-    <dependency>
-        <groupId>org.apache.spark</groupId>
-        <artifactId>spark-core_2.12</artifactId>
-        <version>${spark.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.spark</groupId>
       <artifactId>spark-sql_2.12</artifactId>
       <version>${spark.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.logging.log4j</groupId>
-      <artifactId>log4j-core</artifactId>
-      <version>2.12.0</version>
     </dependency>
   </dependencies>
 
@@ -136,6 +115,21 @@
               <descriptorRef>jar-with-dependencies</descriptorRef>
             </descriptorRefs>
           </configuration>
+        </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-checkstyle-plugin</artifactId>
+            <version>3.1.0</version>
+            <configuration>
+              <configLocation>checkstyle.xml</configLocation>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                </execution>
+            </executions>
         </plugin>
       </plugins>
     </pluginManagement>
