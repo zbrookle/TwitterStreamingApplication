@@ -1,5 +1,9 @@
 package com.ZachApp.app;
 
+// Threading Packages
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 // JavaFX packages
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -19,9 +23,13 @@ import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
-import java.util.concurrent.atomic.AtomicReference;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
+import javafx.geometry.Pos;
 
 // Twitter packages
 import twitter4j.StatusListener;
@@ -54,6 +62,8 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.streaming.StreamingQueryManager;
+import org.apache.spark.sql.streaming.StreamingQueryListener;
 
 /**
  * TwitterDataStream connects to the twitter api and writes tweet data to csv
@@ -83,8 +93,10 @@ class TwitterDataStream {
   /**
     * Constructor for the datastream class.
     * @param currentTweetText is text of the current tweet
+    * @param endFeed is an atomic boolean that receives from the UI when to
+    * terminate the stream
     */
-  TwitterDataStream(final StringProperty currentTweetText) {
+  TwitterDataStream(final StringProperty currentTweetText, final AtomicBoolean endFeed) {
     // Initialize the stream instance
     twitterStream = new TwitterStreamFactory().getInstance();
     partition = 0;
@@ -93,6 +105,11 @@ class TwitterDataStream {
     StatusListener listener = new StatusListener() {
       // Create place to store data
       public void onStatus(final Status status) {
+          if (endFeed.get()) {
+            twitterStream.shutdown();
+            System.out.println("Stopping twitter!");
+          }
+
           // Arrange data in a list
           ArrayList row;
           try {
@@ -189,6 +206,10 @@ class TwitterDataStream {
     // Start the stream
     twitterStream.filter(tweetFilterQuery);
   }
+
+  public void stopStreaming() {
+    twitterStream.shutdown();
+  }
 }
 
 /**
@@ -213,11 +234,18 @@ class SparkStreamer {
   private Dataset csvDF;
 
   /**
+    * Instance of the query that is currently streaming.
+    */
+  private StreamingQuery query;
+
+  /**
     * Constructor method for the spark stream.
     * @throws StreamingQueryException handles errors that may occur during
     * streaming
+    * @param endFeed is an atomic boolean that receives from the UI when to
+    * terminate the stream
     */
-  SparkStreamer() throws StreamingQueryException {
+  SparkStreamer(final AtomicBoolean endFeed) throws StreamingQueryException {
     // Initialize instance of the spark app
     Builder builder = new Builder();
     spark = builder.master("local").appName("TwitterStream").getOrCreate();
@@ -249,14 +277,33 @@ class SparkStreamer {
     // Dataset filtered = csvDF.agg(max(Column("RetweetCount")));
     Dataset filtered = spark.sql("select max(TextRangeEnd) from TWEET_DATA");
 
-    StreamingQuery query;
+    StreamingQueryManager manager = new StreamingQueryManager(spark);
+    manager.addListener(new StreamingQueryListener() {
+      @Override
+      public void onQueryStarted(QueryStartedEvent event) {
+
+      }
+
+      @Override
+      public void onQueryProgress(QueryProgressEvent event) {
+        if (endFeed.get()) {
+          query.stop();
+          spark.stop();
+          System.out.println("Stopping spark!");
+        }
+      }
+
+      @Override
+      public void onQueryTerminated(QueryTerminatedEvent event) {
+
+      }
+    });
+
     query = filtered.writeStream()
       .outputMode("complete")
       .option("checkpointLocation", "checkpoint/")
       .format("console")
       .start();
-
-    //query.awaitTermination();
   }
 }
 
@@ -271,6 +318,12 @@ public class App extends Application {
     */
   private int tweetCount;
 
+  private void setRegionSize(final Region region, double width, double height) {
+    region.setPrefSize(width, height);
+    region.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    region.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+  }
+
   @Override
   public void start(final Stage primaryStage) throws Exception {
     // Create a root pane
@@ -278,6 +331,9 @@ public class App extends Application {
 
     // Create an AtomicReference with a string to pass tweets between front and back end
     final AtomicReference<String> tweetText = new AtomicReference("");
+
+    // Create an atomic boolean to pass between front and backend to terminate the streaming instances
+    final AtomicBoolean endPressed = new AtomicBoolean(false);
 
     // Get screen bounds
     Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
@@ -292,30 +348,26 @@ public class App extends Application {
     PieChart piechart = new PieChart(); // Create Pie chart
     chartPane.addRow(0, piechart); // Add pie chart
     // StackedBarChart barchart = new StackedBarChart(22);
-    // chartPane.addRow(1, barchart);
-    chartPane.setPrefSize(screenWidth / 3, screenHeight);
-    chartPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
-    chartPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    setRegionSize(chartPane, columnWidth, screenHeight);
 
     /* Twitter feed column */
     // Set content pane
     final GridPane twitterFeedPane = new GridPane();
-    twitterFeedPane.setPrefSize(screenWidth / 3, screenHeight);
+    twitterFeedPane.setPrefSize(columnWidth, screenHeight);
     twitterFeedPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxWidth(Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxHeight(Region.USE_COMPUTED_SIZE);
 
+    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
     // Set scrolling pane
     ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
-    feedScrollPane.setPrefSize(screenWidth / 3, screenHeight);
-    feedScrollPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
-    feedScrollPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+    setRegionSize(feedScrollPane, columnWidth, screenHeight);
     feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
     feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
     tweetCount = 0; // Variable to keep track of tweet row
     final Model model = new Model();
-    model.stringProperty().addListener(new ChangeListener<String>() {
+    model.tweetProperty().addListener(new ChangeListener<String>() {
       @Override
       public void changed(final ObservableValue<? extends String> observable,
           final String oldValue, final String newValue) {
@@ -325,7 +377,7 @@ public class App extends Application {
             public void run() {
               double tweetBoxHeight = screenHeight / 12;
               if (tweetCount > 10) {
-                twitterFeedPane.setPrefHeight(twitterFeedPane.getPrefHeight() + screenHeight / 12);
+                twitterFeedPane.setPrefHeight(twitterFeedPane.getPrefHeight() + tweetBoxHeight);
               }
               Label tweetTextVisual = new Label(newValue.toString());
               tweetTextVisual.setWrapText(true);
@@ -342,33 +394,65 @@ public class App extends Application {
       }
     });
 
-    // Interface Column
-    GridPane inputPane = new GridPane();
+    // model.endFeedProperty().addListener(new ChangeListener<String>() {
+    //   @Override
+    //   public void changed(final ObservableValue<? extends Boolean> observable,
+    //       final Boolean oldValue, final Boolean newValue) {
+    //     if (endPressed.getAndSet(newValue) != false) {
+    //       Platform.runLater(new Runnable() {
+    //         @Override
+    //         public void run() {
+    //
+    //         }
+    //       });
+    //     }
+    //
+    //   }
+    // });
 
-    Label keywordsLabel = new Label("Please enter keywords");
-    inputPane.addRow(0, keywordsLabel); // Add instructions
+    /* Interface Column */
+    double inputPaneVerticalSpacing = screenHeight / 100;
+    VBox inputPane = new VBox(inputPaneVerticalSpacing);
+    inputPane.setAlignment(Pos.BASELINE_RIGHT);
 
-    final TextField keywordsInput = new TextField();
-    inputPane.addRow(1, keywordsInput);  // Add text field for key words
+    final Label instructions = new Label("Please enter keywords");
 
-    // Set up button that will Initialize the twitter feed analysis
+    HBox keywordsPane = new HBox();
+    keywordsPane.setAlignment(Pos.BASELINE_RIGHT);
+    Label keywordsLabel = new Label("Keywords:  ");
+    final TextField keywordsInput = new TextField("Harry Potter");
+    keywordsPane.getChildren().addAll(keywordsLabel, keywordsInput);
+
+    // Set up buttons that will initialize and end the twitter feed analysis
     final Button startFeed = new Button("Start Twitter Feed");
+    final Button endFeed = new Button("End Twitter Feed");
+    endFeed.setDisable(true);
+
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
           String[] words = new String[]{keywordsInput.getText()};
           startFeed.setDisable(true);
+          endFeed.setDisable(false);
+          instructions.setText("Now streaming Twitter data");
           model.setKeywords(words);
           model.start();
         }
     });
-    inputPane.addRow(2, startFeed); // Add the start button
-    inputPane.setPrefSize(screenWidth / 3, screenHeight);
-    inputPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
-    inputPane.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+
+    // TODO this doesn't work so try using an atomic boolean to do it instead
+    endFeed.setOnAction(new EventHandler<ActionEvent>() {
+        @Override
+        public void handle(final ActionEvent arg0) {
+          startFeed.setDisable(false);
+          endFeed.setDisable(true);
+          model.getEndFeed().getAndSet(true);
+        }
+    });
+    setRegionSize(inputPane, columnWidth, screenHeight);
+    inputPane.getChildren().addAll(instructions, keywordsPane, startFeed, endFeed);
 
     // TODO Still need to add button that will terminate the stream
-
 
     // TODO Still need to add in a menu for the top bar
 
@@ -398,12 +482,22 @@ public class App extends Application {
     /**
       * Wrapper for the text of the tweet.
       */
-    private StringProperty stringProperty;
+    private StringProperty tweetProperty;
+
+    /**
+      * Atomic boolean that determines whether to end the threads.
+      */
+    private AtomicBoolean endFeed;
 
     /**
       * Variable to store the app's instance of the spark streamer.
       */
     private SparkStreamer sparkTweets;
+
+    /**
+      * Variable used to store the app's instance of the twitter data stream
+      */
+    private TwitterDataStream myStream;
 
     /**
       * An array of words that will be passed to twitter4j to get tweets.
@@ -414,24 +508,33 @@ public class App extends Application {
       * Constructor for model.
       */
     public Model() {
-      stringProperty = new SimpleStringProperty(this, "int", "");
+      tweetProperty = new SimpleStringProperty(this, "string", "");
+      endFeed = new AtomicBoolean(false);
       setDaemon(true);
     }
 
     /**
-      * Get method for string of stirngProperty.
-      * @return stringProperty
+      * Get method for the endFeed AtomicBoolean
+      * @return endFeed AtomicBoolean
       */
-    public String getString() {
-      return stringProperty.get();
+    public AtomicBoolean getEndFeed() {
+      return endFeed;
     }
 
     /**
-      * Get method for stringProperty.
-      * @return stringProperty
+      * Get method for string of stirngProperty.
+      * @return tweetProperty string
       */
-    public StringProperty stringProperty() {
-      return stringProperty;
+    public String getTweet() {
+      return tweetProperty.get();
+    }
+
+    /**
+      * Get method for tweetProperty.
+      * @return tweetProperty
+      */
+    public StringProperty tweetProperty() {
+      return tweetProperty;
     }
 
     /**
@@ -444,13 +547,14 @@ public class App extends Application {
 
     @Override
     public void start() {
-      TwitterDataStream myStream = new TwitterDataStream(stringProperty);
+      endFeed.set(false);
+      TwitterDataStream myStream = new TwitterDataStream(tweetProperty, endFeed);
       myStream.streamData(keywords);
-      // try {
-      //   sparkTweets = new SparkStreamer();
-      // } catch (StreamingQueryException e) {
-      //   System.out.println("Stream exception!");
-      // }
+      try {
+        sparkTweets = new SparkStreamer(endFeed);
+      } catch (StreamingQueryException e) {
+        System.out.println("Stream exception!");
+      }
     }
   }
 
