@@ -30,6 +30,8 @@ import javafx.beans.value.ObservableValue;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.geometry.Pos;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 
 // Twitter packages
 import twitter4j.StatusListener;
@@ -42,6 +44,10 @@ import twitter4j.StallWarning;
 
 // Java packages
 import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.io.File;
+import java.lang.InterruptedException;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -64,6 +70,10 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.streaming.StreamingQueryManager;
 import org.apache.spark.sql.streaming.StreamingQueryListener;
+import org.apache.spark.sql.ForeachWriter;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.streaming.Trigger;
+import org.apache.spark.api.java.function.VoidFunction2;
 
 /**
  * TwitterDataStream connects to the twitter api and writes tweet data to csv
@@ -106,42 +116,41 @@ class TwitterDataStream {
       // Create place to store data
       public void onStatus(final Status status) {
           if (endFeed.get()) {
-            twitterStream.shutdown();
-            System.out.println("Stopping twitter!");
+            twitterStream.cleanUp();
           }
 
           // Arrange data in a list
           ArrayList row;
           try {
             row = new ArrayList() {{
-                    add(status.getUser().getName());
-                    add(status.getUser().getId());
-                    add(status.getCreatedAt());
-                    add(status.getDisplayTextRangeStart());
-                    add(status.getDisplayTextRangeEnd());
-                    add(status.getFavoriteCount());
-                    add(status.getLang());
-                    add(status.getPlace().getCountry());
-                    add(status.getPlace().getGeometryCoordinates().toString());
-                    add(status.getRetweetCount());
-                    add(status.getText());
-                    add(status.isRetweet());
-                  }};
+              add(status.getUser().getName());
+              add(status.getUser().getId());
+              add(status.getCreatedAt());
+              add(status.getDisplayTextRangeStart());
+              add(status.getDisplayTextRangeEnd());
+              add(status.getFavoriteCount());
+              add(status.getLang());
+              add(status.getPlace().getCountry());
+              add(status.getPlace().getGeometryCoordinates().toString());
+              add(status.getRetweetCount());
+              add(status.getText());
+              add(status.isRetweet());
+            }};
           } catch (NullPointerException e) {
             row = new ArrayList() {{
-                                    add(status.getUser().getName());
-                                    add(status.getUser().getId());
-                                    add(status.getCreatedAt());
-                                    add(status.getDisplayTextRangeStart());
-                                    add(status.getDisplayTextRangeEnd());
-                                    add(status.getFavoriteCount());
-                                    add(status.getLang());
-                                    add("");
-                                    add("");
-                                    add(status.getRetweetCount());
-                                    add(status.getText());
-                                    add(status.isRetweet());
-                                  }};
+              add(status.getUser().getName());
+              add(status.getUser().getId());
+              add(status.getCreatedAt());
+              add(status.getDisplayTextRangeStart());
+              add(status.getDisplayTextRangeEnd());
+              add(status.getFavoriteCount());
+              add(status.getLang());
+              add("");
+              add("");
+              add(status.getRetweetCount());
+              add(status.getText());
+              add(status.isRetweet());
+            }};
           }
 
           // Change the text of the current tweet
@@ -206,10 +215,6 @@ class TwitterDataStream {
     // Start the stream
     twitterStream.filter(tweetFilterQuery);
   }
-
-  public void stopStreaming() {
-    twitterStream.shutdown();
-  }
 }
 
 /**
@@ -250,20 +255,22 @@ class SparkStreamer {
     Builder builder = new Builder();
     spark = builder.master("local").appName("TwitterStream").getOrCreate();
     spark.sparkContext().setLogLevel("ERROR");
+    spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown","true");
 
     // Create Schema for data
     schema = new StructType(new StructField[] {
-      new StructField("UserID", DataTypes.LongType, false, Metadata.empty()),
-      new StructField("created_at", DataTypes.StringType, false, Metadata.empty()),
-      new StructField("TextRangeStart", DataTypes.IntegerType, false, Metadata.empty()),
-      new StructField("TextRangeEnd", DataTypes.IntegerType, false, Metadata.empty()),
-      new StructField("FavoriteCount", DataTypes.IntegerType, false, Metadata.empty()),
-      new StructField("Language", DataTypes.StringType, false, Metadata.empty()),
-      new StructField("Place", DataTypes.StringType, false, Metadata.empty()),
-      new StructField("Coordinates", DataTypes.StringType, false, Metadata.empty()),
-      new StructField("RetweetCount", DataTypes.IntegerType, false, Metadata.empty()),
-      new StructField("Text", DataTypes.StringType, false, Metadata.empty()),
-      new StructField("isRetweet", DataTypes.BooleanType, false, Metadata.empty())
+      new StructField("UserName", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("UserID", DataTypes.LongType, true, Metadata.empty()),
+      new StructField("created_at", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("TextRangeStart", DataTypes.IntegerType, true, Metadata.empty()),
+      new StructField("TextRangeEnd", DataTypes.IntegerType, true, Metadata.empty()),
+      new StructField("FavoriteCount", DataTypes.IntegerType, true, Metadata.empty()),
+      new StructField("Language", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("Place", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("Coordinates", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("RetweetCount", DataTypes.IntegerType, true, Metadata.empty()),
+      new StructField("Text", DataTypes.StringType, true, Metadata.empty()),
+      new StructField("isRetweet", DataTypes.BooleanType, true, Metadata.empty())
     });
 
     // Define where to read the twitter data from
@@ -274,36 +281,38 @@ class SparkStreamer {
       System.out.println("ERROR: Problem creating temp view");
     }
 
-    // Dataset filtered = csvDF.agg(max(Column("RetweetCount")));
-    Dataset filtered = spark.sql("select max(TextRangeEnd) from TWEET_DATA");
+    String sqlQuery = "select"
+    + " Username,"
+    + " FavoriteCount,"
+    + " TextRangeEnd,"
+    + " case when Language = 'en' then 'English'"
+    + " when Language = 'und' then 'Undetermined'"
+    + " when Language = 'ht' then 'Haitian'"
+    + " when Language = 'ja' then 'Japanese'"
+    + " when Language = 'ru' then 'Russian'"
+    + " when Language = 'in' then 'Indonesian'"
+    + " when Language = 'fr' then 'French'"
+    + " when Language = 'es' then 'Spanish'"
+    + " else Language end as Language"
+    + " from TWEET_DATA";
 
-    StreamingQueryManager manager = new StreamingQueryManager(spark);
-    manager.addListener(new StreamingQueryListener() {
-      @Override
-      public void onQueryStarted(QueryStartedEvent event) {
+    Dataset twitterDataSet = spark.sql(sqlQuery);
 
-      }
-
-      @Override
-      public void onQueryProgress(QueryProgressEvent event) {
-        if (endFeed.get()) {
-          query.stop();
-          spark.stop();
-          System.out.println("Stopping spark!");
+    query = twitterDataSet.writeStream()
+      .outputMode("update")
+      .trigger(Trigger.ProcessingTime(200L))
+      .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
+        public void call(Dataset<Row> dataset, Long batchid) {
+          dataset.show();
+          List<Row> datalist = dataset.collectAsList();
+          System.out.println("There are " + dataset.count() + " tweets!");
         }
-      }
-
-      @Override
-      public void onQueryTerminated(QueryTerminatedEvent event) {
-
-      }
-    });
-
-    query = filtered.writeStream()
-      .outputMode("complete")
-      .option("checkpointLocation", "checkpoint/")
-      .format("console")
+      })
       .start();
+  }
+
+  public void stopStreaming() {
+    spark.stop();
   }
 }
 
@@ -332,9 +341,6 @@ public class App extends Application {
     // Create an AtomicReference with a string to pass tweets between front and back end
     final AtomicReference<String> tweetText = new AtomicReference("");
 
-    // Create an atomic boolean to pass between front and backend to terminate the streaming instances
-    final AtomicBoolean endPressed = new AtomicBoolean(false);
-
     // Get screen bounds
     Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
     final double xPos = screenBounds.getMinX();
@@ -345,7 +351,11 @@ public class App extends Application {
 
     /* Chart column */
     GridPane chartPane = new GridPane();
-    PieChart piechart = new PieChart(); // Create Pie chart
+    ObservableList<PieChart.Data> pieChartData =
+                FXCollections.observableArrayList(
+                new PieChart.Data("Language", 13));
+        final PieChart piechart = new PieChart(pieChartData);
+        piechart.setTitle("Language Distribution");
     chartPane.addRow(0, piechart); // Add pie chart
     // StackedBarChart barchart = new StackedBarChart(22);
     setRegionSize(chartPane, columnWidth, screenHeight);
@@ -366,12 +376,12 @@ public class App extends Application {
     feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
     tweetCount = 0; // Variable to keep track of tweet row
-    final Model model = new Model();
-    model.tweetProperty().addListener(new ChangeListener<String>() {
+    final TwitterThread twitterThread = new TwitterThread();
+    twitterThread.tweetProperty().addListener(new ChangeListener<String>() {
       @Override
       public void changed(final ObservableValue<? extends String> observable,
           final String oldValue, final String newValue) {
-        if (tweetText.getAndSet(newValue.toString()) != "") {
+        if (tweetText.getAndSet(newValue.toString()) != "" && !twitterThread.getEndFeed().get()) {
           Platform.runLater(new Runnable() {
             @Override
             public void run() {
@@ -394,21 +404,8 @@ public class App extends Application {
       }
     });
 
-    // model.endFeedProperty().addListener(new ChangeListener<String>() {
-    //   @Override
-    //   public void changed(final ObservableValue<? extends Boolean> observable,
-    //       final Boolean oldValue, final Boolean newValue) {
-    //     if (endPressed.getAndSet(newValue) != false) {
-    //       Platform.runLater(new Runnable() {
-    //         @Override
-    //         public void run() {
-    //
-    //         }
-    //       });
-    //     }
-    //
-    //   }
-    // });
+    final SparkThread sparkThread = new SparkThread();
+    sparkThread.start();
 
     /* Interface Column */
     double inputPaneVerticalSpacing = screenHeight / 100;
@@ -420,7 +417,7 @@ public class App extends Application {
     HBox keywordsPane = new HBox();
     keywordsPane.setAlignment(Pos.BASELINE_RIGHT);
     Label keywordsLabel = new Label("Keywords:  ");
-    final TextField keywordsInput = new TextField("Harry Potter");
+    final TextField keywordsInput = new TextField("football");
     keywordsPane.getChildren().addAll(keywordsLabel, keywordsInput);
 
     // Set up buttons that will initialize and end the twitter feed analysis
@@ -435,24 +432,39 @@ public class App extends Application {
           startFeed.setDisable(true);
           endFeed.setDisable(false);
           instructions.setText("Now streaming Twitter data");
-          model.setKeywords(words);
-          model.start();
+          twitterThread.setKeywords(words);
+          twitterThread.start();
         }
     });
 
-    // TODO this doesn't work so try using an atomic boolean to do it instead
+    // TODO this still isn't ending spark
     endFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
           startFeed.setDisable(false);
           endFeed.setDisable(true);
-          model.getEndFeed().getAndSet(true);
+          twitterThread.getEndFeed().getAndSet(true);
+
+          // Put the UI thread to sleep to allow for twitter to stop
+          try {
+            Thread.sleep(1000);
+          } catch (InterruptedException e) {
+            System.out.println("InterruptedException!");
+          }
+
+          // After twitter has stopped, delete the stream files
+          for(File file: new File("stream").listFiles())
+             if (!file.isDirectory())
+                 file.delete();
+
+          // Clear feed
+          twitterFeedPane.getChildren().clear();
+          tweetCount = 0;
+          instructions.setText("Please enter keywords");
         }
     });
     setRegionSize(inputPane, columnWidth, screenHeight);
     inputPane.getChildren().addAll(instructions, keywordsPane, startFeed, endFeed);
-
-    // TODO Still need to add button that will terminate the stream
 
     // TODO Still need to add in a menu for the top bar
 
@@ -476,9 +488,9 @@ public class App extends Application {
   }
 
   /**
-    * Model handles the interaction between Spark and the front end.
+    * TwitterThread handles the interaction between Twitter and the front end.
     */
-  public class Model extends Thread {
+  public class TwitterThread extends Thread {
     /**
       * Wrapper for the text of the tweet.
       */
@@ -488,11 +500,6 @@ public class App extends Application {
       * Atomic boolean that determines whether to end the threads.
       */
     private AtomicBoolean endFeed;
-
-    /**
-      * Variable to store the app's instance of the spark streamer.
-      */
-    private SparkStreamer sparkTweets;
 
     /**
       * Variable used to store the app's instance of the twitter data stream
@@ -505,9 +512,9 @@ public class App extends Application {
     private String[] keywords;
 
     /**
-      * Constructor for model.
+      * Constructor for twitterThread.
       */
-    public Model() {
+    public TwitterThread() {
       tweetProperty = new SimpleStringProperty(this, "string", "");
       endFeed = new AtomicBoolean(false);
       setDaemon(true);
@@ -550,6 +557,41 @@ public class App extends Application {
       endFeed.set(false);
       TwitterDataStream myStream = new TwitterDataStream(tweetProperty, endFeed);
       myStream.streamData(keywords);
+    }
+  }
+
+  /**
+    * SparkThread handles the interaction between Spark and the front end.
+    */
+  public class SparkThread extends Thread {
+    /**
+      * Atomic boolean that determines whether to end the threads.
+      */
+    private AtomicBoolean endFeed;
+
+    /**
+      * Variable to store the app's instance of the spark streamer.
+      */
+    private SparkStreamer sparkTweets;
+
+    /**
+      * Constructor for twitterThread.
+      */
+    public SparkThread() {
+      endFeed = new AtomicBoolean(false);
+      setDaemon(true);
+    }
+
+    /**
+      * Get method for the endFeed AtomicBoolean
+      * @return endFeed AtomicBoolean
+      */
+    public AtomicBoolean getEndFeed() {
+      return endFeed;
+    }
+
+    @Override
+    public void start() {
       try {
         sparkTweets = new SparkStreamer(endFeed);
       } catch (StreamingQueryException e) {
@@ -565,4 +607,6 @@ public class App extends Application {
   public static void main(final String[] args) {
       launch(args);
   }
+
+
 }
