@@ -23,8 +23,6 @@ import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.layout.HBox;
@@ -44,10 +42,9 @@ import twitter4j.StallWarning;
 
 // Java packages
 import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.io.File;
-import java.lang.InterruptedException;
+import java.util.Map;
+import java.util.HashMap;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -68,12 +65,10 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
-import org.apache.spark.sql.streaming.StreamingQueryManager;
-import org.apache.spark.sql.streaming.StreamingQueryListener;
-import org.apache.spark.sql.ForeachWriter;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.streaming.Trigger;
 import org.apache.spark.api.java.function.VoidFunction2;
+import org.apache.spark.sql.functions;
 
 /**
  * TwitterDataStream connects to the twitter api and writes tweet data to csv
@@ -244,6 +239,11 @@ class SparkStreamer {
   private StreamingQuery query;
 
   /**
+    * An atomic wrapper to hold the map of language counts from the query.
+    */
+  private AtomicReference<Map> atomicLanguageCounts;
+
+  /**
     * Constructor method for the spark stream.
     * @throws StreamingQueryException handles errors that may occur during
     * streaming
@@ -255,7 +255,7 @@ class SparkStreamer {
     Builder builder = new Builder();
     spark = builder.master("local").appName("TwitterStream").getOrCreate();
     spark.sparkContext().setLogLevel("ERROR");
-    spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown","true");
+    spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown", "true");
 
     // Create Schema for data
     schema = new StructType(new StructField[] {
@@ -281,6 +281,9 @@ class SparkStreamer {
       System.out.println("ERROR: Problem creating temp view");
     }
 
+    Map<String, Double> languageCounts = new HashMap<String, Double>();
+    atomicLanguageCounts.set(languageCounts);
+
     String sqlQuery = "select"
     + " Username,"
     + " FavoriteCount,"
@@ -293,26 +296,30 @@ class SparkStreamer {
     + " when Language = 'in' then 'Indonesian'"
     + " when Language = 'fr' then 'French'"
     + " when Language = 'es' then 'Spanish'"
-    + " else Language end as Language"
+    + " when Language = 'pt' then 'Portugese'"
+    + " when Language = 'th' then 'Thai'"
+    + " when Language = 'tl' then 'Tagalog'"
+    + " else Language end as Language, "
+    + " 1 as tweet_count"
     + " from TWEET_DATA";
-
     Dataset twitterDataSet = spark.sql(sqlQuery);
-
     query = twitterDataSet.writeStream()
       .outputMode("update")
       .trigger(Trigger.ProcessingTime(200L))
       .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
-        public void call(Dataset<Row> dataset, Long batchid) {
-          dataset.show();
-          List<Row> datalist = dataset.collectAsList();
-          System.out.println("There are " + dataset.count() + " tweets!");
-        }
-      })
-      .start();
+        public void call(final Dataset<Row> dataset, final Long batchid) {
+          Dataset<Row> langCounts = dataset.groupBy(dataset.col("Language"))
+                                           .agg(functions.sum(dataset.col("tweet_count")));
+                                         }
+      }).start();
   }
 
-  public void stopStreaming() {
-    spark.stop();
+  /**
+    * Get method for atomicLanguageCounts.
+    * @return atomicLanguageCounts
+    */
+  public AtomicReference<Map> getAtomicLanguageCounts() {
+    return atomicLanguageCounts;
   }
 }
 
@@ -327,10 +334,45 @@ public class App extends Application {
     */
   private int tweetCount;
 
-  private void setRegionSize(final Region region, double width, double height) {
+  /**
+    * Stores the data that goes inside the pie chart.
+    */
+  private ObservableList<PieChart.Data> pieChartData;
+
+  /**
+    * Sets the size of various UI elements.
+    * @param region is the UI element
+    * @param width is the width
+    * @param height is the height
+    */
+  private void setRegionSize(final Region region, final double width, final double height) {
     region.setPrefSize(width, height);
     region.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
     region.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
+  }
+
+  /**
+    * Method for adding a new data element to the pie chart.
+    * @param name is the name of the element
+    * @param value is the numeric value of the element
+    */
+  public void naiveAddData(final String name, final double value) {
+      pieChartData.add(new javafx.scene.chart.PieChart.Data(name, value));
+  }
+
+  /**
+    * Method for updating existing Data-Object if name matches.
+    * @param name is the name of the element
+    * @param value is the numeric value of the element
+    */
+  public void addData(final String name, final double value) {
+      for (javafx.scene.chart.PieChart.Data d : pieChartData) {
+          if (d.getName().equals(name)) {
+              d.setPieValue(value);
+              return;
+          }
+      }
+      naiveAddData(name, value);
   }
 
   @Override
@@ -351,9 +393,8 @@ public class App extends Application {
 
     /* Chart column */
     GridPane chartPane = new GridPane();
-    ObservableList<PieChart.Data> pieChartData =
-                FXCollections.observableArrayList(
-                new PieChart.Data("Language", 13));
+    pieChartData = FXCollections.observableArrayList(
+                    );
         final PieChart piechart = new PieChart(pieChartData);
         piechart.setTitle("Language Distribution");
     chartPane.addRow(0, piechart); // Add pie chart
@@ -424,7 +465,6 @@ public class App extends Application {
     final Button startFeed = new Button("Start Twitter Feed");
     final Button endFeed = new Button("End Twitter Feed");
     endFeed.setDisable(true);
-
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
@@ -437,7 +477,6 @@ public class App extends Application {
         }
     });
 
-    // TODO this still isn't ending spark
     endFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
@@ -447,16 +486,16 @@ public class App extends Application {
 
           // Put the UI thread to sleep to allow for twitter to stop
           try {
-            Thread.sleep(1000);
+            Thread.sleep(1500);
           } catch (InterruptedException e) {
             System.out.println("InterruptedException!");
           }
-
           // After twitter has stopped, delete the stream files
-          for(File file: new File("stream").listFiles())
-             if (!file.isDirectory())
+          for (File file: new File("stream").listFiles()) {
+             if (!file.isDirectory()) {
                  file.delete();
-
+             }
+          }
           // Clear feed
           twitterFeedPane.getChildren().clear();
           tweetCount = 0;
@@ -502,7 +541,7 @@ public class App extends Application {
     private AtomicBoolean endFeed;
 
     /**
-      * Variable used to store the app's instance of the twitter data stream
+      * Variable used to store the app's instance of the twitter data stream.
       */
     private TwitterDataStream myStream;
 
@@ -521,7 +560,7 @@ public class App extends Application {
     }
 
     /**
-      * Get method for the endFeed AtomicBoolean
+      * Get method for the endFeed AtomicBoolean.
       * @return endFeed AtomicBoolean
       */
     public AtomicBoolean getEndFeed() {
@@ -555,7 +594,7 @@ public class App extends Application {
     @Override
     public void start() {
       endFeed.set(false);
-      TwitterDataStream myStream = new TwitterDataStream(tweetProperty, endFeed);
+      myStream = new TwitterDataStream(tweetProperty, endFeed);
       myStream.streamData(keywords);
     }
   }
@@ -583,7 +622,7 @@ public class App extends Application {
     }
 
     /**
-      * Get method for the endFeed AtomicBoolean
+      * Get method for the endFeed AtomicBoolean.
       * @return endFeed AtomicBoolean
       */
     public AtomicBoolean getEndFeed() {
