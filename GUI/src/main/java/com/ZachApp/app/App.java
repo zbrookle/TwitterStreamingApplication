@@ -23,6 +23,8 @@ import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.layout.HBox;
@@ -42,9 +44,12 @@ import twitter4j.StallWarning;
 
 // Java packages
 import java.util.ArrayList;
+import java.util.List;
 import java.io.File;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -68,6 +73,7 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.streaming.Trigger;
 import org.apache.spark.api.java.function.VoidFunction2;
+import org.apache.spark.api.java.function.ReduceFunction;
 import org.apache.spark.sql.functions;
 
 /**
@@ -239,18 +245,13 @@ class SparkStreamer {
   private StreamingQuery query;
 
   /**
-    * An atomic wrapper to hold the map of language counts from the query.
-    */
-  private AtomicReference<Map> atomicLanguageCounts;
-
-  /**
     * Constructor method for the spark stream.
     * @throws StreamingQueryException handles errors that may occur during
     * streaming
     * @param endFeed is an atomic boolean that receives from the UI when to
     * terminate the stream
     */
-  SparkStreamer(final AtomicBoolean endFeed) throws StreamingQueryException {
+  SparkStreamer(final AtomicReference<HashMap> atomicLanguageCounts, final BooleanProperty dataRefresh) throws StreamingQueryException {
     // Initialize instance of the spark app
     Builder builder = new Builder();
     spark = builder.master("local").appName("TwitterStream").getOrCreate();
@@ -281,9 +282,8 @@ class SparkStreamer {
       System.out.println("ERROR: Problem creating temp view");
     }
 
-    Map<String, Double> languageCounts = new HashMap<String, Double>();
-    atomicLanguageCounts.set(languageCounts);
-
+    final HashMap<String, Double> languageCountsMap = new HashMap<String, Double>();
+    atomicLanguageCounts.set(languageCountsMap);
     String sqlQuery = "select"
     + " Username,"
     + " FavoriteCount,"
@@ -299,27 +299,55 @@ class SparkStreamer {
     + " when Language = 'pt' then 'Portugese'"
     + " when Language = 'th' then 'Thai'"
     + " when Language = 'tl' then 'Tagalog'"
-    + " else Language end as Language, "
-    + " 1 as tweet_count"
+    + " else 'Unknown' end as Language, "
+    + " 1 as tweet_count, "
+    + " Text"
     + " from TWEET_DATA";
     Dataset twitterDataSet = spark.sql(sqlQuery);
+    final List<String> allHashtags = new ArrayList<String>();
+    // Create and compile regex to match hashtag
+    final Pattern hashtagPattern = Pattern.compile("#.*\\s");
     query = twitterDataSet.writeStream()
       .outputMode("update")
       .trigger(Trigger.ProcessingTime(200L))
       .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
         public void call(final Dataset<Row> dataset, final Long batchid) {
+          Dataset<Row> tweetRows = dataset.select(dataset.col("Text"));
+          List<Row> tweetRowList = tweetRows.collectAsList();
+          for (int i = 0; i < tweetRowList.size(); i++) {
+            String tweetText = tweetRowList.get(i).getString(0);
+            // Get hashtag data
+            if (tweetText != null) {
+              //Matcher matcher = hashtagPattern.matcher(tweetText);
+              String[] matches = org.mentaregex.match(tweetText, "#[a-zA-Z0-9]+");
+              System.out.println(matches);
+              }
+            }
+          }
+
+          // Get language Count data
           Dataset<Row> langCounts = dataset.groupBy(dataset.col("Language"))
                                            .agg(functions.sum(dataset.col("tweet_count")));
-                                         }
+          List<Row> langCountsList = langCounts.collectAsList();
+          for (int i = 0; i < langCountsList.size(); i++) {
+            String language = langCountsList.get(i).getString(0);
+            Long languageCount = langCountsList.get(i).getLong(1);
+            double languageCountDouble = languageCount.doubleValue();
+            if (languageCountsMap.containsKey(language)) {
+              double currentLanguageCount = languageCountsMap.get(language);
+              languageCountsMap.put(language, currentLanguageCount + languageCountDouble);
+            } else {
+              languageCountsMap.put(language, languageCountDouble);
+            }
+            atomicLanguageCounts.set(languageCountsMap);
+          }
+          if (dataRefresh.get()) {
+            dataRefresh.set(false);
+          } else {
+            dataRefresh.set(true);
+          }
+        }
       }).start();
-  }
-
-  /**
-    * Get method for atomicLanguageCounts.
-    * @return atomicLanguageCounts
-    */
-  public AtomicReference<Map> getAtomicLanguageCounts() {
-    return atomicLanguageCounts;
   }
 }
 
@@ -356,7 +384,7 @@ public class App extends Application {
     * @param name is the name of the element
     * @param value is the numeric value of the element
     */
-  public void naiveAddData(final String name, final double value) {
+  public void naiveAddDataPieChart(final String name, final double value) {
       pieChartData.add(new javafx.scene.chart.PieChart.Data(name, value));
   }
 
@@ -365,14 +393,14 @@ public class App extends Application {
     * @param name is the name of the element
     * @param value is the numeric value of the element
     */
-  public void addData(final String name, final double value) {
+  public void addDataPieChart(final String name, final double value) {
       for (javafx.scene.chart.PieChart.Data d : pieChartData) {
           if (d.getName().equals(name)) {
               d.setPieValue(value);
               return;
           }
       }
-      naiveAddData(name, value);
+      naiveAddDataPieChart(name, value);
   }
 
   @Override
@@ -393,10 +421,9 @@ public class App extends Application {
 
     /* Chart column */
     GridPane chartPane = new GridPane();
-    pieChartData = FXCollections.observableArrayList(
-                    );
-        final PieChart piechart = new PieChart(pieChartData);
-        piechart.setTitle("Language Distribution");
+    pieChartData = FXCollections.observableArrayList();
+    final PieChart piechart = new PieChart(pieChartData);
+    piechart.setTitle("Language Distribution");
     chartPane.addRow(0, piechart); // Add pie chart
     // StackedBarChart barchart = new StackedBarChart(22);
     setRegionSize(chartPane, columnWidth, screenHeight);
@@ -445,7 +472,29 @@ public class App extends Application {
       }
     });
 
-    final SparkThread sparkThread = new SparkThread();
+    // An atomic boolean for keeping track between the two interfaces of the
+    // fact that the data has been refreshed.
+    final AtomicBoolean dataRefresh = new AtomicBoolean(true);
+
+    // An atomic wrapper to hold the map of language counts from the query.
+    final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
+
+    final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh);
+    sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
+      @Override
+      public void changed(final ObservableValue<? extends Boolean> observable,
+          final Boolean oldValue, final Boolean newValue) {
+          Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+              HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
+              for (String key : languageCounts.keySet()) {
+                  addDataPieChart(key, languageCounts.get(key));
+              }
+            }
+        });
+      }
+    });
     sparkThread.start();
 
     /* Interface Column */
@@ -500,6 +549,10 @@ public class App extends Application {
           twitterFeedPane.getChildren().clear();
           tweetCount = 0;
           instructions.setText("Please enter keywords");
+
+          // Clear pie chart and corresponding data
+          atomicLanguageCounts.get().clear();
+          pieChartData.clear();
         }
     });
     setRegionSize(inputPane, columnWidth, screenHeight);
@@ -604,38 +657,50 @@ public class App extends Application {
     */
   public class SparkThread extends Thread {
     /**
-      * Atomic boolean that determines whether to end the threads.
-      */
-    private AtomicBoolean endFeed;
-
-    /**
       * Variable to store the app's instance of the spark streamer.
       */
     private SparkStreamer sparkTweets;
 
     /**
-      * Constructor for twitterThread.
+      * Variable to store the data refresh property to use for listening
       */
-    public SparkThread() {
-      endFeed = new AtomicBoolean(false);
-      setDaemon(true);
-    }
+    private BooleanProperty dataRefreshProperty;
 
     /**
-      * Get method for the endFeed AtomicBoolean.
-      * @return endFeed AtomicBoolean
+      * Atomic language counts to pass to spark
       */
-    public AtomicBoolean getEndFeed() {
-      return endFeed;
+    private AtomicReference<HashMap> atomicLanguageCounts;
+
+    /**
+      * Variable to communicate data refresh between spark and app
+      */
+    private AtomicBoolean atomicDataRefresh;
+
+    /**
+      * Constructor for SparkThread.
+      */
+    public SparkThread(AtomicReference<HashMap> languageCounts, AtomicBoolean dataRefresh) {
+      dataRefreshProperty = new SimpleBooleanProperty(this, "bool", false);
+      atomicLanguageCounts = languageCounts;
+      atomicDataRefresh = dataRefresh;
+      setDaemon(true);
     }
 
     @Override
     public void start() {
       try {
-        sparkTweets = new SparkStreamer(endFeed);
+        sparkTweets = new SparkStreamer(atomicLanguageCounts, dataRefreshProperty);
       } catch (StreamingQueryException e) {
         System.out.println("Stream exception!");
       }
+    }
+
+    /**
+      * Get method for dataRefreshProperty.
+      * @return dataRefreshProperty
+      */
+    public BooleanProperty dataRefreshProperty() {
+      return dataRefreshProperty;
     }
   }
 

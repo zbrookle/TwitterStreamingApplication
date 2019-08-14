@@ -54,6 +54,11 @@
       <artifactId>spark-sql_2.12</artifactId>
       <version>${spark.version}</version>
     </dependency>
+    <dependency>
+      <groupId>me.soliveirajr</groupId>
+      <artifactId>menta-regex</artifactId>
+      <version>0.9.5</version>
+    </dependency>
   </dependencies>
 
   <build>
