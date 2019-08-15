@@ -749,7 +749,11 @@ public class App extends Application {
                 for (int j = 0; j < words.length; j++) {
                     // Replace punctuation and add to map
                     words[j] = words[j].replaceAll("[^\\w]", "");
-                    addToWordMap(words[j]);
+
+                    // Only add on words that are likely not articles
+                    if (words[j].length() > 3) {
+                      addToWordMap(words[j]);
+                    }
                 }
                 atomicWordCounts.set(wordCountsMap);
               }
