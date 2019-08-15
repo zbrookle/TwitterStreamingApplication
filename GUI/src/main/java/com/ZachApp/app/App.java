@@ -64,6 +64,9 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileNotFoundException;
 
 // Spark
 import org.apache.spark.sql.SparkSession;
@@ -379,6 +382,16 @@ public class App extends Application {
     // An atomic wrapper to hold the map of word counts from the tweets.
     final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
 
+    // Read in the ISO 639-1 codes for languages from language-codes.csv
+    BufferedReader codeReader = new BufferedReader(new FileReader("language-codes.csv"));
+    String codeLine = "";
+    final HashMap<String,String> languageCodeMap = new HashMap<String, String>();
+
+    while((codeLine=codeReader.readLine()) != null){
+        String[] strings = codeLine.split(",");
+        languageCodeMap.put(strings[0], strings[1]);
+    }
+
     final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
       @Override
@@ -389,7 +402,12 @@ public class App extends Application {
             public void run() {
               HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
               for (String key : languageCounts.keySet()) {
-                  addDataPieChart(key, languageCounts.get(key));
+                  String language = languageCodeMap.get(key);
+                  if (language == null) {
+                    addDataPieChart(key, languageCounts.get(key));
+                  } else {
+                    addDataPieChart(language, languageCounts.get(key));
+                  }
               }
 
               // Get and sort the words by count
@@ -446,6 +464,13 @@ public class App extends Application {
           // Clear tweets from feed
           twitterFeedPane.getChildren().clear();
 
+          // Clear the stream files currently in the stream directory
+          for (File file: new File("stream").listFiles()) {
+             if (!file.isDirectory()) {
+                 file.delete();
+             }
+          }
+
           startFeed.setDisable(true);
           endFeed.setDisable(false);
           instructions.setText("Now streaming Twitter data");
@@ -467,12 +492,7 @@ public class App extends Application {
           } catch (InterruptedException e) {
             System.out.println("InterruptedException!");
           }
-          // After twitter has stopped, delete the stream files
-          for (File file: new File("stream").listFiles()) {
-             if (!file.isDirectory()) {
-                 file.delete();
-             }
-          }
+
           // Clear feed
           tweetCount = 0;
           instructions.setText("Please enter keywords");
@@ -575,6 +595,7 @@ public class App extends Application {
     }
   }
 
+  // TODO figure out how to stop/start the spark streams OR figure out how to now have it crash when the files are deleted
   /**
     * SparkThread handles the interaction between Spark and the front end.
     */
@@ -681,20 +702,10 @@ public class App extends Application {
       wordCountsMap = new HashMap<String, Double>();
       atomicLanguageCounts.set(languageCountsMap);
 
+      // TODO add in all languages from wikipedia
       String languageQuery = "select"
-      + " case when Language = 'en' then 'English'"
-      + " when Language = 'und' then 'Undetermined'"
-      + " when Language = 'ht' then 'Haitian'"
-      + " when Language = 'ja' then 'Japanese'"
-      + " when Language = 'ru' then 'Russian'"
-      + " when Language = 'in' then 'Indonesian'"
-      + " when Language = 'fr' then 'French'"
-      + " when Language = 'es' then 'Spanish'"
-      + " when Language = 'pt' then 'Portugese'"
-      + " when Language = 'th' then 'Thai'"
-      + " when Language = 'tl' then 'Tagalog'"
-      + " when Language is null then 'Unknown'"
-      + " else 'Unknown' end as Language, "
+      + " case when Language is null then 'Undetermined'"
+      + " else Language end as Language, "
       + " count(UserName) as tweet_count"
       + " from TWEET_DATA"
       + " group by language";
