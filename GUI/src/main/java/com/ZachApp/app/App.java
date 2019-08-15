@@ -516,6 +516,12 @@ public class App extends Application {
     primaryStage.show(); // Show app
   }
 
+  @Override
+  public void stop(){
+      System.out.println("Stage is closing");
+      // Clear out files
+      clearStreamDir();
+  }
   /**
     * TwitterThread handles the interaction between Twitter and the front end.
     */
@@ -700,16 +706,21 @@ public class App extends Application {
       String languageQuery = "select"
       + " case when language is null or language = 'und' then 'Undetermined'"
       + " else language end as language,"
-      + " count(UserName) as tweet_count"
+      + " count(language) as tweet_count"
       + " from TWEET_DATA"
-      + " group by language";
+      + " group by language"
+      + " having tweet_count > 0";
+      // ^^^^^^^  this line shouldn't need to be here but
+      // For some reason spark gives two different 'Undetermined' row counts
+      // One of which is 0 so I'm filtering it out
+
       Dataset languageCountsDataSet = spark.sql(languageQuery);
+
       languageCountsDataSet.writeStream()
         .outputMode("complete")
-        .trigger(Trigger.ProcessingTime(100L))
+        .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
-            dataset.show();
             List<Row> langCountsList = dataset.collectAsList();
             for (int i = 0; i < langCountsList.size(); i++) {
               String language = langCountsList.get(i).getString(0);
@@ -717,13 +728,6 @@ public class App extends Application {
               double languageCountDouble = languageCount.doubleValue();
               languageCountsMap.put(language, languageCountDouble); // Put the values in the map
               atomicLanguageCounts.set(languageCountsMap); // Set the atomic variable
-            }
-            System.out.println(atomicLanguageCounts.get());
-            // Signal that an update has occurred
-            if (dataRefreshProperty.get()) {
-              dataRefreshProperty.set(false);
-            } else {
-              dataRefreshProperty.set(true);
             }
           }
         }).start();
@@ -734,9 +738,7 @@ public class App extends Application {
         .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
-            dataset.show();
             final List<String> allHashtags = new ArrayList<String>();
-            String topWordsQuery = "";
             Dataset<Row> tweetRows = dataset.select(dataset.col("Text"));
             List<Row> tweetRowList = tweetRows.collectAsList();
             for (int i = 0; i < tweetRowList.size(); i++) {
@@ -750,6 +752,12 @@ public class App extends Application {
                     addToWordMap(words[j]);
                 }
                 atomicWordCounts.set(wordCountsMap);
+              }
+              // Signal that an update has occurred
+              if (dataRefreshProperty.get()) {
+                dataRefreshProperty.set(false);
+              } else {
+                dataRefreshProperty.set(true);
               }
             }
           }
