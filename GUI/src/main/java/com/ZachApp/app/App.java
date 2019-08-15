@@ -54,6 +54,8 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Collections;
+import java.util.Comparator;
 
 // CSV Output
 import org.apache.commons.csv.CSVFormat;
@@ -190,7 +192,6 @@ class TwitterDataStream {
             csvPrinter.flush();
           } catch (IOException e) {
             System.out.println("ERROR: Could not write to file");
-            System.out.println(row);
           }
       }
 
@@ -313,7 +314,7 @@ public class App extends Application {
     final CategoryAxis xAxis = new CategoryAxis();
     final NumberAxis yAxis = new NumberAxis();
     final BarChart<String,Number> barchart = new BarChart<String,Number>(xAxis,yAxis);
-    barchart.setTitle("Tweet Word Frequencies");
+    barchart.setTitle("Top 5 Tweet Word Frequencies");
     xAxis.setLabel("Word");
     yAxis.setLabel("Frequency");
     chartPane.addRow(1, barchart);
@@ -391,11 +392,23 @@ public class App extends Application {
                   addDataPieChart(key, languageCounts.get(key));
               }
 
+              // Get and sort the words by count
               HashMap<String, Double> wordCounts = atomicWordCounts.get();
-              for(String key : wordCounts.keySet()) {
-                addDataBarChart(key, wordCounts.get(key));
+              List<HashMap.Entry<String, Double>> entries = new ArrayList<HashMap.Entry<String, Double>> (wordCounts.entrySet());
+              Collections.sort(entries,
+                               new Comparator<HashMap.Entry<String, Double>>() {
+                                 public int compare(HashMap.Entry<String, Double> a, HashMap.Entry<String, Double> b) {
+                                   return Double.compare(a.getValue(), b.getValue());
+                                 }
+                               });
+              Collections.reverse(entries);
+              // Clear the data and add the current top 5 words
+              barChartData.clear();
+              if (entries.size() >= 5) {
+                for(int i = 0; i < 5; i++) {
+                  addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
+                }
               }
-
             }
         });
       }
@@ -423,6 +436,16 @@ public class App extends Application {
         @Override
         public void handle(final ActionEvent arg0) {
           String[] words = new String[]{keywordsInput.getText()};
+
+          // Clear bar and pie chart and corresponding data
+          atomicLanguageCounts.get().clear();
+          atomicWordCounts.get().clear();
+          pieChartData.clear();
+          barChartData.clear();
+
+          // Clear tweets from feed
+          twitterFeedPane.getChildren().clear();
+
           startFeed.setDisable(true);
           endFeed.setDisable(false);
           instructions.setText("Now streaming Twitter data");
@@ -451,13 +474,8 @@ public class App extends Application {
              }
           }
           // Clear feed
-          twitterFeedPane.getChildren().clear();
           tweetCount = 0;
           instructions.setText("Please enter keywords");
-
-          // Clear pie chart and corresponding data
-          atomicLanguageCounts.get().clear();
-          pieChartData.clear();
         }
     });
     setRegionSize(inputPane, columnWidth, screenHeight);
@@ -561,11 +579,6 @@ public class App extends Application {
     * SparkThread handles the interaction between Spark and the front end.
     */
   public class SparkThread extends Thread {
-    /**
-      * Variable to store the app's instance of the spark streamer.
-      */
-    private SparkStreamer sparkTweets;
-
     /**
       * Variable to store the data refresh property to use for listening
       */
@@ -680,6 +693,7 @@ public class App extends Application {
       + " when Language = 'pt' then 'Portugese'"
       + " when Language = 'th' then 'Thai'"
       + " when Language = 'tl' then 'Tagalog'"
+      + " when Language is null then 'Unknown'"
       + " else 'Unknown' end as Language, "
       + " count(UserName) as tweet_count"
       + " from TWEET_DATA"
@@ -690,6 +704,7 @@ public class App extends Application {
         .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
+            dataset.cache();
             List<Row> langCountsList = dataset.collectAsList();
             for (int i = 0; i < langCountsList.size(); i++) {
               String language = langCountsList.get(i).getString(0);
