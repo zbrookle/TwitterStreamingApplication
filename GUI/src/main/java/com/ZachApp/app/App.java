@@ -171,19 +171,7 @@ class TwitterDataStream {
           // Create the csv file to write to
           try {
             writer = Files.newBufferedWriter(Paths.get("stream/data-" + Integer.toString(partition) + ".csv"));
-            csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT
-                            .withHeader("UserName",
-                                        "UserID",
-                                        "created_at",
-                                        "TextRangeStart",
-                                        "TextRangeEnd",
-                                        "FavoriteCount",
-                                        "Language",
-                                        "Place",
-                                        "Coordinates",
-                                        "RetweetCount",
-                                        "Text",
-                                        "isRetweet"));
+            csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT);
             partition++;
           } catch (IOException e) {
             System.out.println("ERROR: Problem creating data file");
@@ -291,8 +279,19 @@ public class App extends Application {
       barChartData.add(new XYChart.Data(name, value));
   }
 
+  /* Clears the stream files currently in the stream directory */
+  private void clearStreamDir() {
+    for (File file: new File("stream").listFiles()) {
+       if (!file.isDirectory()) {
+           file.delete();
+       }
+    }
+  }
+
   @Override
   public void start(final Stage primaryStage) throws Exception {
+    clearStreamDir(); // Clear the directory so that spark doesn't read old files
+
     // Create a root pane
     GridPane root = new GridPane();
 
@@ -464,12 +463,7 @@ public class App extends Application {
           // Clear tweets from feed
           twitterFeedPane.getChildren().clear();
 
-          // Clear the stream files currently in the stream directory
-          for (File file: new File("stream").listFiles()) {
-             if (!file.isDirectory()) {
-                 file.delete();
-             }
-          }
+          clearStreamDir();
 
           startFeed.setDisable(true);
           endFeed.setDisable(false);
@@ -667,7 +661,7 @@ public class App extends Application {
 
       // Initialize instance of the spark app
       Builder builder = new Builder();
-      spark = builder.master("local").appName("TwitterStream").getOrCreate();
+      spark = builder.master("local[2]").appName("TwitterStream").getOrCreate();
       spark.sparkContext().setLogLevel("ERROR");
       spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown", "true");
 
@@ -704,18 +698,18 @@ public class App extends Application {
 
       // TODO add in all languages from wikipedia
       String languageQuery = "select"
-      + " case when Language is null then 'Undetermined'"
-      + " else Language end as Language, "
+      + " case when language is null or language = 'und' then 'Undetermined'"
+      + " else language end as language,"
       + " count(UserName) as tweet_count"
       + " from TWEET_DATA"
       + " group by language";
       Dataset languageCountsDataSet = spark.sql(languageQuery);
       languageCountsDataSet.writeStream()
         .outputMode("complete")
-        .trigger(Trigger.ProcessingTime(200L))
+        .trigger(Trigger.ProcessingTime(100L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
-            dataset.cache();
+            dataset.show();
             List<Row> langCountsList = dataset.collectAsList();
             for (int i = 0; i < langCountsList.size(); i++) {
               String language = langCountsList.get(i).getString(0);
@@ -724,6 +718,7 @@ public class App extends Application {
               languageCountsMap.put(language, languageCountDouble); // Put the values in the map
               atomicLanguageCounts.set(languageCountsMap); // Set the atomic variable
             }
+            System.out.println(atomicLanguageCounts.get());
             // Signal that an update has occurred
             if (dataRefreshProperty.get()) {
               dataRefreshProperty.set(false);
@@ -733,12 +728,13 @@ public class App extends Application {
           }
         }).start();
 
-      Dataset wordCountsDataset = spark.sql("select text from TWEET_DATA");
+      Dataset wordCountsDataset = spark.sql("select text, language from TWEET_DATA");
       wordCountsDataset.writeStream()
         .outputMode("append")
         .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
+            dataset.show();
             final List<String> allHashtags = new ArrayList<String>();
             String topWordsQuery = "";
             Dataset<Row> tweetRows = dataset.select(dataset.col("Text"));
