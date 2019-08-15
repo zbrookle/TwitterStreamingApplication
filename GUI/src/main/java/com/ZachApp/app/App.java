@@ -19,6 +19,10 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.scene.layout.GridPane;
 import javafx.scene.chart.PieChart;
+import javafx.scene.chart.BarChart;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
 import javafx.scene.layout.Region;
 import javafx.geometry.Rectangle2D;
 import javafx.beans.property.StringProperty;
@@ -75,6 +79,8 @@ import org.apache.spark.sql.streaming.Trigger;
 import org.apache.spark.api.java.function.VoidFunction2;
 import org.apache.spark.api.java.function.ReduceFunction;
 import org.apache.spark.sql.functions;
+
+import org.mentaregex.Regex;
 
 /**
  * TwitterDataStream connects to the twitter api and writes tweet data to csv
@@ -219,139 +225,6 @@ class TwitterDataStream {
 }
 
 /**
- * The SparkStreamer handles all aggregations and processing of the twitter
- * data. It reads from the csv's output by the TwitterDataStream.
- */
-class SparkStreamer {
-
-  /**
-   * Instance of the spakr session.
-   */
-  private SparkSession spark;
-
-  /**
-   * Defines the structure of the data that will be processed by spark.
-   */
-  private StructType schema;
-
-  /**
-   * Dataset to store the data output of the twitter stream.
-   */
-  private Dataset csvDF;
-
-  /**
-    * Instance of the query that is currently streaming.
-    */
-  private StreamingQuery query;
-
-  /**
-    * Constructor method for the spark stream.
-    * @throws StreamingQueryException handles errors that may occur during
-    * streaming
-    * @param endFeed is an atomic boolean that receives from the UI when to
-    * terminate the stream
-    */
-  SparkStreamer(final AtomicReference<HashMap> atomicLanguageCounts, final BooleanProperty dataRefresh) throws StreamingQueryException {
-    // Initialize instance of the spark app
-    Builder builder = new Builder();
-    spark = builder.master("local").appName("TwitterStream").getOrCreate();
-    spark.sparkContext().setLogLevel("ERROR");
-    spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown", "true");
-
-    // Create Schema for data
-    schema = new StructType(new StructField[] {
-      new StructField("UserName", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("UserID", DataTypes.LongType, true, Metadata.empty()),
-      new StructField("created_at", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("TextRangeStart", DataTypes.IntegerType, true, Metadata.empty()),
-      new StructField("TextRangeEnd", DataTypes.IntegerType, true, Metadata.empty()),
-      new StructField("FavoriteCount", DataTypes.IntegerType, true, Metadata.empty()),
-      new StructField("Language", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("Place", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("Coordinates", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("RetweetCount", DataTypes.IntegerType, true, Metadata.empty()),
-      new StructField("Text", DataTypes.StringType, true, Metadata.empty()),
-      new StructField("isRetweet", DataTypes.BooleanType, true, Metadata.empty())
-    });
-
-    // Define where to read the twitter data from
-    csvDF = spark.readStream().option("sep", ",").schema(schema).csv("stream/data*.csv");
-    try {
-      csvDF.createTempView("TWEET_DATA");
-    } catch (AnalysisException e) {
-      System.out.println("ERROR: Problem creating temp view");
-    }
-
-    final HashMap<String, Double> languageCountsMap = new HashMap<String, Double>();
-    atomicLanguageCounts.set(languageCountsMap);
-    String sqlQuery = "select"
-    + " Username,"
-    + " FavoriteCount,"
-    + " TextRangeEnd,"
-    + " case when Language = 'en' then 'English'"
-    + " when Language = 'und' then 'Undetermined'"
-    + " when Language = 'ht' then 'Haitian'"
-    + " when Language = 'ja' then 'Japanese'"
-    + " when Language = 'ru' then 'Russian'"
-    + " when Language = 'in' then 'Indonesian'"
-    + " when Language = 'fr' then 'French'"
-    + " when Language = 'es' then 'Spanish'"
-    + " when Language = 'pt' then 'Portugese'"
-    + " when Language = 'th' then 'Thai'"
-    + " when Language = 'tl' then 'Tagalog'"
-    + " else 'Unknown' end as Language, "
-    + " 1 as tweet_count, "
-    + " Text"
-    + " from TWEET_DATA";
-    Dataset twitterDataSet = spark.sql(sqlQuery);
-    final List<String> allHashtags = new ArrayList<String>();
-    // Create and compile regex to match hashtag
-    final Pattern hashtagPattern = Pattern.compile("#.*\\s");
-    query = twitterDataSet.writeStream()
-      .outputMode("update")
-      .trigger(Trigger.ProcessingTime(200L))
-      .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
-        public void call(final Dataset<Row> dataset, final Long batchid) {
-          Dataset<Row> tweetRows = dataset.select(dataset.col("Text"));
-          List<Row> tweetRowList = tweetRows.collectAsList();
-          for (int i = 0; i < tweetRowList.size(); i++) {
-            String tweetText = tweetRowList.get(i).getString(0);
-            // Get hashtag data
-            if (tweetText != null) {
-              //Matcher matcher = hashtagPattern.matcher(tweetText);
-              String[] matches = org.mentaregex.match(tweetText, "#[a-zA-Z0-9]+");
-              System.out.println(matches);
-              }
-            }
-          }
-
-          // Get language Count data
-          Dataset<Row> langCounts = dataset.groupBy(dataset.col("Language"))
-                                           .agg(functions.sum(dataset.col("tweet_count")));
-          List<Row> langCountsList = langCounts.collectAsList();
-          for (int i = 0; i < langCountsList.size(); i++) {
-            String language = langCountsList.get(i).getString(0);
-            Long languageCount = langCountsList.get(i).getLong(1);
-            double languageCountDouble = languageCount.doubleValue();
-            if (languageCountsMap.containsKey(language)) {
-              double currentLanguageCount = languageCountsMap.get(language);
-              languageCountsMap.put(language, currentLanguageCount + languageCountDouble);
-            } else {
-              languageCountsMap.put(language, languageCountDouble);
-            }
-            atomicLanguageCounts.set(languageCountsMap);
-          }
-          if (dataRefresh.get()) {
-            dataRefresh.set(false);
-          } else {
-            dataRefresh.set(true);
-          }
-        }
-      }).start();
-  }
-}
-
-/**
  * App is the user interface and main class. It encompasses user input and
  * visuals such as graphs. It is implemented using JavaFX.
  */
@@ -368,6 +241,11 @@ public class App extends Application {
   private ObservableList<PieChart.Data> pieChartData;
 
   /**
+    * Stores the data that goes inside the bar chart.
+    */
+  private ObservableList<XYChart.Data<String, Double>> barChartData;
+
+  /**
     * Sets the size of various UI elements.
     * @param region is the UI element
     * @param width is the width
@@ -377,15 +255,6 @@ public class App extends Application {
     region.setPrefSize(width, height);
     region.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
     region.setMaxSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
-  }
-
-  /**
-    * Method for adding a new data element to the pie chart.
-    * @param name is the name of the element
-    * @param value is the numeric value of the element
-    */
-  public void naiveAddDataPieChart(final String name, final double value) {
-      pieChartData.add(new javafx.scene.chart.PieChart.Data(name, value));
   }
 
   /**
@@ -400,7 +269,22 @@ public class App extends Application {
               return;
           }
       }
-      naiveAddDataPieChart(name, value);
+      pieChartData.add(new javafx.scene.chart.PieChart.Data(name, value));
+  }
+
+  /**
+    * Method for updating existing Data-Object if name matches.
+    * @param name is the name of the element
+    * @param value is the numeric value of the element
+    */
+  public void addDataBarChart(final String name, final double value) {
+      for (XYChart.Data d : barChartData) {
+          if (d.getXValue().equals(name)) {
+              d.setYValue(value);
+              return;
+          }
+      }
+      barChartData.add(new XYChart.Data(name, value));
   }
 
   @Override
@@ -425,7 +309,19 @@ public class App extends Application {
     final PieChart piechart = new PieChart(pieChartData);
     piechart.setTitle("Language Distribution");
     chartPane.addRow(0, piechart); // Add pie chart
-    // StackedBarChart barchart = new StackedBarChart(22);
+
+    final CategoryAxis xAxis = new CategoryAxis();
+    final NumberAxis yAxis = new NumberAxis();
+    final BarChart<String,Number> barchart = new BarChart<String,Number>(xAxis,yAxis);
+    barchart.setTitle("Tweet Word Frequencies");
+    xAxis.setLabel("Word");
+    yAxis.setLabel("Frequency");
+    chartPane.addRow(1, barchart);
+    barChartData = FXCollections.observableArrayList();
+    XYChart.Series wordCounts = new XYChart.Series(barChartData);
+    wordCounts.setName("Words");
+    barchart.getData().add(wordCounts);
+
     setRegionSize(chartPane, columnWidth, screenHeight);
 
     /* Twitter feed column */
@@ -479,7 +375,10 @@ public class App extends Application {
     // An atomic wrapper to hold the map of language counts from the query.
     final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
 
-    final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh);
+    // An atomic wrapper to hold the map of word counts from the tweets.
+    final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
+
+    final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
       @Override
       public void changed(final ObservableValue<? extends Boolean> observable,
@@ -491,6 +390,12 @@ public class App extends Application {
               for (String key : languageCounts.keySet()) {
                   addDataPieChart(key, languageCounts.get(key));
               }
+
+              HashMap<String, Double> wordCounts = atomicWordCounts.get();
+              for(String key : wordCounts.keySet()) {
+                addDataBarChart(key, wordCounts.get(key));
+              }
+
             }
         });
       }
@@ -672,27 +577,161 @@ public class App extends Application {
     private AtomicReference<HashMap> atomicLanguageCounts;
 
     /**
+      * Atomic language counts to pass to spark
+      */
+    private AtomicReference<HashMap> atomicWordCounts;
+
+    /**
       * Variable to communicate data refresh between spark and app
       */
     private AtomicBoolean atomicDataRefresh;
 
     /**
+     * Instance of the spakr session.
+     */
+    private SparkSession spark;
+
+    /**
+     * Defines the structure of the data that will be processed by spark.
+     */
+    private StructType schema;
+
+    /**
+     * Dataset to store the data output of the twitter stream.
+     */
+    private Dataset csvDF;
+
+    /**
+      * Instance of the query that is currently streaming.
+      */
+    private StreamingQuery query;
+
+    /**
+      * Tracks the counts of words that appear in tweets
+      */
+    private HashMap<String, Double> wordCountsMap;
+
+    private void addToWordMap(String word){
+      if (wordCountsMap.get(word) == null) {
+        wordCountsMap.put(word, 1.0);
+      } else {
+        double count = wordCountsMap.get(word);
+        count++;
+        wordCountsMap.put(word, count);
+      }
+    }
+
+    /**
       * Constructor for SparkThread.
       */
-    public SparkThread(AtomicReference<HashMap> languageCounts, AtomicBoolean dataRefresh) {
+    public SparkThread(AtomicReference<HashMap> languageCounts, AtomicBoolean dataRefresh, AtomicReference<HashMap> wordCounts) throws StreamingQueryException {
       dataRefreshProperty = new SimpleBooleanProperty(this, "bool", false);
       atomicLanguageCounts = languageCounts;
+      atomicWordCounts = wordCounts;
       atomicDataRefresh = dataRefresh;
       setDaemon(true);
+
+      // Initialize instance of the spark app
+      Builder builder = new Builder();
+      spark = builder.master("local").appName("TwitterStream").getOrCreate();
+      spark.sparkContext().setLogLevel("ERROR");
+      spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown", "true");
+
+      // Create Schema for data
+      schema = new StructType(new StructField[] {
+        new StructField("UserName", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("UserID", DataTypes.LongType, true, Metadata.empty()),
+        new StructField("created_at", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("TextRangeStart", DataTypes.IntegerType, true, Metadata.empty()),
+        new StructField("TextRangeEnd", DataTypes.IntegerType, true, Metadata.empty()),
+        new StructField("FavoriteCount", DataTypes.IntegerType, true, Metadata.empty()),
+        new StructField("Language", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("Place", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("Coordinates", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("RetweetCount", DataTypes.IntegerType, true, Metadata.empty()),
+        new StructField("Text", DataTypes.StringType, true, Metadata.empty()),
+        new StructField("isRetweet", DataTypes.BooleanType, true, Metadata.empty())
+      });
+
+      // Define where to read the twitter data from
+      csvDF = spark.readStream().option("sep", ",").schema(schema).csv("stream/data*.csv");
+      try {
+        csvDF.createTempView("TWEET_DATA");
+      } catch (AnalysisException e) {
+        System.out.println("ERROR: Problem creating temp view");
+      }
     }
 
     @Override
     public void start() {
-      try {
-        sparkTweets = new SparkStreamer(atomicLanguageCounts, dataRefreshProperty);
-      } catch (StreamingQueryException e) {
-        System.out.println("Stream exception!");
-      }
+      final HashMap<String, Double> languageCountsMap = new HashMap<String, Double>();
+      wordCountsMap = new HashMap<String, Double>();
+      atomicLanguageCounts.set(languageCountsMap);
+
+      String languageQuery = "select"
+      + " case when Language = 'en' then 'English'"
+      + " when Language = 'und' then 'Undetermined'"
+      + " when Language = 'ht' then 'Haitian'"
+      + " when Language = 'ja' then 'Japanese'"
+      + " when Language = 'ru' then 'Russian'"
+      + " when Language = 'in' then 'Indonesian'"
+      + " when Language = 'fr' then 'French'"
+      + " when Language = 'es' then 'Spanish'"
+      + " when Language = 'pt' then 'Portugese'"
+      + " when Language = 'th' then 'Thai'"
+      + " when Language = 'tl' then 'Tagalog'"
+      + " else 'Unknown' end as Language, "
+      + " count(UserName) as tweet_count"
+      + " from TWEET_DATA"
+      + " group by language";
+      Dataset languageCountsDataSet = spark.sql(languageQuery);
+      languageCountsDataSet.writeStream()
+        .outputMode("complete")
+        .trigger(Trigger.ProcessingTime(200L))
+        .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
+          public void call(final Dataset<Row> dataset, final Long batchid) {
+            List<Row> langCountsList = dataset.collectAsList();
+            for (int i = 0; i < langCountsList.size(); i++) {
+              String language = langCountsList.get(i).getString(0);
+              Long languageCount = langCountsList.get(i).getLong(1);
+              double languageCountDouble = languageCount.doubleValue();
+              languageCountsMap.put(language, languageCountDouble); // Put the values in the map
+              atomicLanguageCounts.set(languageCountsMap); // Set the atomic variable
+            }
+            // Signal that an update has occurred
+            if (dataRefreshProperty.get()) {
+              dataRefreshProperty.set(false);
+            } else {
+              dataRefreshProperty.set(true);
+            }
+          }
+        }).start();
+
+      Dataset wordCountsDataset = spark.sql("select text from TWEET_DATA");
+      wordCountsDataset.writeStream()
+        .outputMode("append")
+        .trigger(Trigger.ProcessingTime(200L))
+        .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
+          public void call(final Dataset<Row> dataset, final Long batchid) {
+            final List<String> allHashtags = new ArrayList<String>();
+            String topWordsQuery = "";
+            Dataset<Row> tweetRows = dataset.select(dataset.col("Text"));
+            List<Row> tweetRowList = tweetRows.collectAsList();
+            for (int i = 0; i < tweetRowList.size(); i++) {
+              String tweetText = tweetRowList.get(i).getString(0);
+              // Get words from tweet
+              if (tweetText != null) {
+                String[] words = tweetText.split("\\s+");
+                for (int j = 0; j < words.length; j++) {
+                    // Replace punctuation and add to map
+                    words[j] = words[j].replaceAll("[^\\w]", "");
+                    addToWordMap(words[j]);
+                }
+                atomicWordCounts.set(wordCountsMap);
+              }
+            }
+          }
+        }).start();
     }
 
     /**
