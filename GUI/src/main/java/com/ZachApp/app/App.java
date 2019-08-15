@@ -50,10 +50,7 @@ import twitter4j.StallWarning;
 import java.util.ArrayList;
 import java.util.List;
 import java.io.File;
-import java.util.Map;
 import java.util.HashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.Collections;
 import java.util.Comparator;
 
@@ -66,7 +63,6 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.io.FileNotFoundException;
 
 // Spark
 import org.apache.spark.sql.SparkSession;
@@ -82,139 +78,10 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.streaming.Trigger;
 import org.apache.spark.api.java.function.VoidFunction2;
-import org.apache.spark.api.java.function.ReduceFunction;
-import org.apache.spark.sql.functions;
 
-import org.mentaregex.Regex;
-
-/**
- * TwitterDataStream connects to the twitter api and writes tweet data to csv
- * files and to the UI.
- */
-class TwitterDataStream {
-  /**
-   * The twitter stream instance.
-   */
-  private TwitterStream twitterStream;
-
-  /**
-    * Gets passed to the csv printer to output data to files.
-    */
-  private BufferedWriter writer;
-
-  /**
-    * Responsible for properly outputting data to csv files.
-    */
-  private CSVPrinter csvPrinter;
-
-  /**
-    * Tracks the partition number.
-    */
-  private int partition;
-
-  /**
-    * Constructor for the datastream class.
-    * @param currentTweetText is text of the current tweet
-    * @param endFeed is an atomic boolean that receives from the UI when to
-    * terminate the stream
-    */
-  TwitterDataStream(final StringProperty currentTweetText, final AtomicBoolean endFeed) {
-    // Initialize the stream instance
-    twitterStream = new TwitterStreamFactory().getInstance();
-    partition = 0;
-
-    // Set up the listener
-    StatusListener listener = new StatusListener() {
-      // Create place to store data
-      public void onStatus(final Status status) {
-          if (endFeed.get()) {
-            twitterStream.cleanUp();
-          }
-
-          // Arrange data in a list
-          ArrayList row;
-          try {
-            row = new ArrayList() {{
-              add(status.getUser().getName());
-              add(status.getUser().getId());
-              add(status.getCreatedAt());
-              add(status.getDisplayTextRangeStart());
-              add(status.getDisplayTextRangeEnd());
-              add(status.getFavoriteCount());
-              add(status.getLang());
-              add(status.getPlace().getCountry());
-              add(status.getPlace().getGeometryCoordinates().toString());
-              add(status.getRetweetCount());
-              add(status.getText());
-              add(status.isRetweet());
-            }};
-          } catch (NullPointerException e) {
-            row = new ArrayList() {{
-              add(status.getUser().getName());
-              add(status.getUser().getId());
-              add(status.getCreatedAt());
-              add(status.getDisplayTextRangeStart());
-              add(status.getDisplayTextRangeEnd());
-              add(status.getFavoriteCount());
-              add(status.getLang());
-              add("");
-              add("");
-              add(status.getRetweetCount());
-              add(status.getText());
-              add(status.isRetweet());
-            }};
-          }
-
-          // Change the text of the current tweet
-          currentTweetText.set(status.getUser().getName() + ":" + status.getText());
-
-          // Create the csv file to write to
-          try {
-            writer = Files.newBufferedWriter(Paths.get("stream/data-" + Integer.toString(partition) + ".csv"));
-            csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT);
-            partition++;
-          } catch (IOException e) {
-            System.out.println("ERROR: Problem creating data file");
-          }
-
-          // Write data out to a CSV file with the appropriate headers
-          try {
-            csvPrinter.printRecord(row);
-            csvPrinter.flush();
-          } catch (IOException e) {
-            System.out.println("ERROR: Could not write to file");
-          }
-      }
-
-      // All these methods needed to be overridden according to the api
-      public void onDeletionNotice(final StatusDeletionNotice statusDeletionNotice) { }
-      public void onTrackLimitationNotice(final int numberOfLimitedStatuses) { }
-      public void onException(final Exception ex) {
-          ex.printStackTrace();
-      }
-      public void onStallWarning(final StallWarning arg0) { }
-      public void onScrubGeo(final long arg0, final long arg1) { }
-    };
-
-    // Add the listener
-    twitterStream.addListener(listener);
-  }
-
-  /**
-    * Method that begins the streaming process.
-    * @param keywords is an array of key words to look for in tweets
-    */
-  public void streamData(final String[] keywords) {
-    // Create a new filter instance
-    FilterQuery tweetFilterQuery = new FilterQuery();
-
-    // Add the keywords to the query
-    tweetFilterQuery.track(keywords);
-
-    // Start the stream
-    twitterStream.filter(tweetFilterQuery);
-  }
-}
+// log4j
+import org.apache.log4j.Logger;
+import org.apache.log4j.Level;
 
 /**
  * App is the user interface and main class. It encompasses user input and
@@ -279,7 +146,9 @@ public class App extends Application {
       barChartData.add(new XYChart.Data(name, value));
   }
 
-  /* Clears the stream files currently in the stream directory */
+  /**
+    * Clears the stream files currently in the stream directory
+    **/
   private void clearStreamDir() {
     for (File file: new File("stream").listFiles()) {
        if (!file.isDirectory()) {
@@ -292,6 +161,7 @@ public class App extends Application {
   public void start(final Stage primaryStage) throws Exception {
     clearStreamDir(); // Clear the directory so that spark doesn't read old files
 
+
     // Create a root pane
     GridPane root = new GridPane();
 
@@ -303,19 +173,21 @@ public class App extends Application {
     final double xPos = screenBounds.getMinX();
     final double yPos = screenBounds.getMinY();
     final double screenWidth = screenBounds.getWidth();
-    final double screenHeight = screenBounds.getHeight() - screenBounds.getHeight() / 100;
+    final double screenHeight = screenBounds.getHeight();// - screenBounds.getHeight() / 25;
     final double columnWidth = screenWidth / 3;
 
     /* Chart column */
     GridPane chartPane = new GridPane();
+    // Add pie chart
     pieChartData = FXCollections.observableArrayList();
     final PieChart piechart = new PieChart(pieChartData);
     piechart.setTitle("Language Distribution");
-    chartPane.addRow(0, piechart); // Add pie chart
+    chartPane.addRow(0, piechart);
 
+    // Add bar chart
     final CategoryAxis xAxis = new CategoryAxis();
     final NumberAxis yAxis = new NumberAxis();
-    final BarChart<String,Number> barchart = new BarChart<String,Number>(xAxis,yAxis);
+    final BarChart<String, Number> barchart = new BarChart<String, Number>(xAxis, yAxis);
     barchart.setTitle("Top 5 Tweet Word Frequencies");
     xAxis.setLabel("Word");
     yAxis.setLabel("Frequency");
@@ -325,7 +197,8 @@ public class App extends Application {
     wordCounts.setName("Words");
     barchart.getData().add(wordCounts);
 
-    setRegionSize(chartPane, columnWidth, screenHeight);
+    // Set column size
+    setRegionSize(chartPane, columnWidth, screenHeight * .92);
 
     /* Twitter feed column */
     // Set content pane
@@ -384,12 +257,16 @@ public class App extends Application {
     // Read in the ISO 639-1 codes for languages from language-codes.csv
     BufferedReader codeReader = new BufferedReader(new FileReader("language-codes.csv"));
     String codeLine = "";
-    final HashMap<String,String> languageCodeMap = new HashMap<String, String>();
+    final HashMap<String, String> languageCodeMap = new HashMap<String, String>();
 
-    while((codeLine=codeReader.readLine()) != null){
+    while ((codeLine = codeReader.readLine()) != null) {
         String[] strings = codeLine.split(",");
         languageCodeMap.put(strings[0], strings[1]);
     }
+
+    // Turn off the log messages for spark
+    Logger.getLogger("org").setLevel(Level.OFF);
+    Logger.getLogger("akka").setLevel(Level.OFF);
 
     final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
@@ -411,10 +288,12 @@ public class App extends Application {
 
               // Get and sort the words by count
               HashMap<String, Double> wordCounts = atomicWordCounts.get();
-              List<HashMap.Entry<String, Double>> entries = new ArrayList<HashMap.Entry<String, Double>> (wordCounts.entrySet());
+              List<HashMap.Entry<String, Double>> entries =
+                new ArrayList<HashMap.Entry<String, Double>>(wordCounts.entrySet());
               Collections.sort(entries,
                                new Comparator<HashMap.Entry<String, Double>>() {
-                                 public int compare(HashMap.Entry<String, Double> a, HashMap.Entry<String, Double> b) {
+                                 public int compare(final HashMap.Entry<String, Double> a,
+                                                    final HashMap.Entry<String, Double> b) {
                                    return Double.compare(a.getValue(), b.getValue());
                                  }
                                });
@@ -422,7 +301,7 @@ public class App extends Application {
               // Clear the data and add the current top 5 words
               barChartData.clear();
               if (entries.size() >= 5) {
-                for(int i = 0; i < 5; i++) {
+                for (int i = 0; i < 5; i++) {
                   addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
                 }
               }
@@ -517,7 +396,7 @@ public class App extends Application {
   }
 
   @Override
-  public void stop(){
+  public void stop() {
       System.out.println("Stage is closing");
       // Clear out files
       clearStreamDir();
@@ -537,22 +416,120 @@ public class App extends Application {
     private AtomicBoolean endFeed;
 
     /**
-      * Variable used to store the app's instance of the twitter data stream.
-      */
-    private TwitterDataStream myStream;
-
-    /**
       * An array of words that will be passed to twitter4j to get tweets.
       */
     private String[] keywords;
 
     /**
-      * Constructor for twitterThread.
+     * The twitter stream instance.
+     */
+    private TwitterStream twitterStream;
+
+    /**
+      * Gets passed to the csv printer to output data to files.
+      */
+    private BufferedWriter writer;
+
+    /**
+      * Responsible for properly outputting data to csv files.
+      */
+    private CSVPrinter csvPrinter;
+
+    /**
+      * Tracks the partition number.
+      */
+    private int partition;
+
+    /**
+      * Constructor for the TwitterThread class.
+      * @param currentTweetText is a string property with the text of the current tweet
+      * @param endFeed is an atomic boolean that receives from the UI when to
+      * terminate the stream
       */
     public TwitterThread() {
       tweetProperty = new SimpleStringProperty(this, "string", "");
       endFeed = new AtomicBoolean(false);
       setDaemon(true);
+
+      // Initialize the stream instance
+      twitterStream = new TwitterStreamFactory().getInstance();
+      partition = 0;
+
+      // Set up the listener
+      StatusListener listener = new StatusListener() {
+        // Create place to store data
+        public void onStatus(final Status status) {
+            if (endFeed.get()) {
+              twitterStream.cleanUp();
+            }
+
+            // Arrange data in a list
+            ArrayList row;
+            try {
+              row = new ArrayList() {{
+                add(status.getUser().getName());
+                add(status.getUser().getId());
+                add(status.getCreatedAt());
+                add(status.getDisplayTextRangeStart());
+                add(status.getDisplayTextRangeEnd());
+                add(status.getFavoriteCount());
+                add(status.getLang());
+                add(status.getPlace().getCountry());
+                add(status.getPlace().getGeometryCoordinates().toString());
+                add(status.getRetweetCount());
+                add(status.getText());
+                add(status.isRetweet());
+              }};
+            } catch (NullPointerException e) {
+              row = new ArrayList() {{
+                add(status.getUser().getName());
+                add(status.getUser().getId());
+                add(status.getCreatedAt());
+                add(status.getDisplayTextRangeStart());
+                add(status.getDisplayTextRangeEnd());
+                add(status.getFavoriteCount());
+                add(status.getLang());
+                add("");
+                add("");
+                add(status.getRetweetCount());
+                add(status.getText());
+                add(status.isRetweet());
+              }};
+            }
+
+            // Change the text of the current tweet
+            tweetProperty.set(status.getUser().getName() + ":" + status.getText());
+
+            // Create the csv file to write to
+            try {
+              writer = Files.newBufferedWriter(Paths.get("stream/data-" + Integer.toString(partition) + ".csv"));
+              csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT);
+              partition++;
+            } catch (IOException e) {
+              System.out.println("ERROR: Problem creating data file");
+            }
+
+            // Write data out to a CSV file with the appropriate headers
+            try {
+              csvPrinter.printRecord(row);
+              csvPrinter.flush();
+            } catch (IOException e) {
+              System.out.println("ERROR: Could not write to file");
+            }
+        }
+
+        // All these methods needed to be overridden according to the api
+        public void onDeletionNotice(final StatusDeletionNotice statusDeletionNotice) { }
+        public void onTrackLimitationNotice(final int numberOfLimitedStatuses) { }
+        public void onException(final Exception ex) {
+            ex.printStackTrace();
+        }
+        public void onStallWarning(final StallWarning arg0) { }
+        public void onScrubGeo(final long arg0, final long arg1) { }
+      };
+
+      // Add the listener
+      twitterStream.addListener(listener);
     }
 
     /**
@@ -587,36 +564,49 @@ public class App extends Application {
       keywords = inputWords;
     }
 
+    /**
+      * Method that begins the streaming process.
+      * @param keywords is an array of key words to look for in tweets
+      */
+    public void streamData(final String[] keywords) {
+      // Create a new filter instance
+      FilterQuery tweetFilterQuery = new FilterQuery();
+
+      // Add the keywords to the query
+      tweetFilterQuery.track(keywords);
+
+      // Start the stream
+      twitterStream.filter(tweetFilterQuery);
+    }
+
     @Override
     public void start() {
       endFeed.set(false);
-      myStream = new TwitterDataStream(tweetProperty, endFeed);
-      myStream.streamData(keywords);
+      streamData(keywords);
     }
   }
 
-  // TODO figure out how to stop/start the spark streams OR figure out how to now have it crash when the files are deleted
   /**
     * SparkThread handles the interaction between Spark and the front end.
     */
   public class SparkThread extends Thread {
     /**
-      * Variable to store the data refresh property to use for listening
+      * Variable to store the data refresh property to use for listening.
       */
     private BooleanProperty dataRefreshProperty;
 
     /**
-      * Atomic language counts to pass to spark
+      * Atomic language counts to pass to spark.
       */
     private AtomicReference<HashMap> atomicLanguageCounts;
 
     /**
-      * Atomic language counts to pass to spark
+      * Atomic language counts to pass to spark.
       */
     private AtomicReference<HashMap> atomicWordCounts;
 
     /**
-      * Variable to communicate data refresh between spark and app
+      * Variable to communicate data refresh between spark and app.
       */
     private AtomicBoolean atomicDataRefresh;
 
@@ -641,11 +631,16 @@ public class App extends Application {
     private StreamingQuery query;
 
     /**
-      * Tracks the counts of words that appear in tweets
+      * Tracks the counts of words that appear in tweets.
       */
     private HashMap<String, Double> wordCountsMap;
 
-    private void addToWordMap(String word){
+    /**
+      * Adds a word to the word counts hashmap if not there and otherwise
+      * adds to the count of that word.
+      * @param word is the string to be added
+      */
+    private void addToWordMap(final String word) {
       if (wordCountsMap.get(word) == null) {
         wordCountsMap.put(word, 1.0);
       } else {
@@ -657,8 +652,14 @@ public class App extends Application {
 
     /**
       * Constructor for SparkThread.
+      * @param languageCounts atomic reference to language counts
+      * @param dataRefresh atomic reference to boolean controlling UI refresh
+      * @param wordCounts atomic reference to word count map
+      * @throws StreamingQueryException
       */
-    public SparkThread(AtomicReference<HashMap> languageCounts, AtomicBoolean dataRefresh, AtomicReference<HashMap> wordCounts) throws StreamingQueryException {
+    public SparkThread(final AtomicReference<HashMap> languageCounts,
+                       final AtomicBoolean dataRefresh,
+                       final AtomicReference<HashMap> wordCounts) throws StreamingQueryException {
       dataRefreshProperty = new SimpleBooleanProperty(this, "bool", false);
       atomicLanguageCounts = languageCounts;
       atomicWordCounts = wordCounts;
@@ -702,7 +703,6 @@ public class App extends Application {
       wordCountsMap = new HashMap<String, Double>();
       atomicLanguageCounts.set(languageCountsMap);
 
-      // TODO add in all languages from wikipedia
       String languageQuery = "select"
       + " case when language is null or language = 'und' then 'Undetermined'"
       + " else language end as language,"
