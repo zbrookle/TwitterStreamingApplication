@@ -138,6 +138,8 @@ public class App extends Application {
     */
   private TwitterThread twitterThread;
 
+  private SparkThread sparkThread;
+
   /**
     * The gridpane where the twitter feed is displayed.
     */
@@ -334,7 +336,7 @@ public class App extends Application {
     // An atomic wrapper to hold the map of word counts from the tweets.
     final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
 
-    final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
+    sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
       @Override
       public void changed(final ObservableValue<? extends Boolean> observable,
@@ -462,7 +464,13 @@ public class App extends Application {
 
   @Override
   public void stop() {
-      System.out.println("Stage is closing");
+
+      twitterThread.stop();
+
+      sparkThread.atomicWordCountsStream().get().stop();
+      sparkThread.atomicLanguageCountsStream().get().stop();
+      sparkThread.stop();
+
       // Clear out files
       clearStreamDir();
   }
@@ -688,14 +696,23 @@ public class App extends Application {
     private Dataset csvDF;
 
     /**
-      * Instance of the query that is currently streaming.
-      */
-    private StreamingQuery query;
-
-    /**
       * Tracks the counts of words that appear in tweets.
       */
     private HashMap<String, Double> wordCountsMap;
+
+    // /**
+    //   * Streaming query for the language counts.
+    //   */
+    // private StreamingQuery languageCountsStream;
+    //
+    // /**
+    //   * Streaming query for the word counts.
+    //   */
+    // private StreamingQuery wordCountsStream;
+
+    private AtomicReference<StreamingQuery> atomicLanguageCountsStream;
+
+    private AtomicReference<StreamingQuery> atomicWordCountsStream;
 
     /**
       * Adds a word to the word counts hashmap if not there and otherwise
@@ -778,7 +795,7 @@ public class App extends Application {
 
       Dataset languageCountsDataSet = spark.sql(languageQuery);
 
-      languageCountsDataSet.writeStream()
+      final StreamingQuery languageCountsStream = languageCountsDataSet.writeStream()
         .outputMode("complete")
         .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
@@ -795,7 +812,7 @@ public class App extends Application {
         }).start();
 
       Dataset wordCountsDataset = spark.sql("select text, language from TWEET_DATA");
-      wordCountsDataset.writeStream()
+      final StreamingQuery wordCountsStream = wordCountsDataset.writeStream()
         .outputMode("append")
         .trigger(Trigger.ProcessingTime(300L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
@@ -829,6 +846,10 @@ public class App extends Application {
             }
           }
         }).start();
+        atomicWordCountsStream = new AtomicReference<StreamingQuery>();
+        atomicLanguageCountsStream = new AtomicReference<StreamingQuery>();
+        atomicWordCountsStream.set(wordCountsStream);
+        atomicLanguageCountsStream.set(languageCountsStream);
     }
 
     /**
@@ -837,6 +858,14 @@ public class App extends Application {
       */
     public BooleanProperty dataRefreshProperty() {
       return dataRefreshProperty;
+    }
+
+    public AtomicReference<StreamingQuery> atomicWordCountsStream() {
+      return atomicWordCountsStream;
+    }
+
+    public AtomicReference<StreamingQuery> atomicLanguageCountsStream() {
+      return atomicLanguageCountsStream;
     }
   }
 
