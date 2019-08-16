@@ -113,6 +113,7 @@ public class App extends Application {
   double screenHeight;
   double columnWidth;
   private TwitterThread twitterThread;
+  private GridPane twitterFeedPane;
 
   /**
     * Sets the size of various UI elements.
@@ -194,16 +195,23 @@ public class App extends Application {
     return chartPane;
   }
 
-  private GridPane twitterFeedPane() {
+  private ScrollPane twitterFeedPane() {
     // Create an AtomicReference with a string to pass tweets between front and back end
     final AtomicReference<String> tweetText = new AtomicReference("");
 
     // Set content pane
-    final GridPane twitterFeedPane = new GridPane();
+    twitterFeedPane = new GridPane();
     twitterFeedPane.setPrefSize(columnWidth, screenHeight);
     twitterFeedPane.setMinSize(Control.USE_PREF_SIZE, Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxWidth(Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxHeight(Region.USE_COMPUTED_SIZE);
+
+    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
+    // Set scrolling pane
+    final ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
+    setRegionSize(feedScrollPane, columnWidth, screenHeight);
+    feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+    feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
     tweetCount = 0; // Variable to keep track of tweet row
     twitterThread = new TwitterThread();
@@ -216,6 +224,10 @@ public class App extends Application {
             @Override
             public void run() {
               double tweetBoxHeight = screenHeight / 12;
+              boolean autoscroll = false;
+              if (feedScrollPane.getVvalue() > .8) {
+                autoscroll = true;
+              }
               if (tweetCount > 10) {
                 twitterFeedPane.setPrefHeight(twitterFeedPane.getPrefHeight() + tweetBoxHeight);
               }
@@ -227,6 +239,9 @@ public class App extends Application {
               twitterFeedPane.addRow(tweetCount, tweetTextVisual);
               tweetCount++;
               String value = tweetText.getAndSet("");
+              if (autoscroll) {
+                feedScrollPane.setVvalue(feedScrollPane.getVmax());
+              }
             }
           });
         }
@@ -234,7 +249,7 @@ public class App extends Application {
       }
     });
 
-    return twitterFeedPane;
+    return feedScrollPane;
   }
 
   @Override
@@ -257,14 +272,7 @@ public class App extends Application {
     final GridPane chartPane = createInterfacePane();
 
     /* Twitter feed */
-    final GridPane twitterFeedPane = twitterFeedPane();
-
-    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
-    // Set scrolling pane
-    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
-    setRegionSize(feedScrollPane, columnWidth, screenHeight);
-    feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-    feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    final ScrollPane feedScrollPane = twitterFeedPane();
 
     // Read in the ISO 639-1 codes for languages from language-codes.csv
     BufferedReader codeReader = new BufferedReader(new FileReader("language-codes.csv"));
