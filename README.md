@@ -28,6 +28,6 @@ oauth.accessTokenSecret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # Interface
 
 
-![If the app has loaded properly it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/tree/master/Pictures/BeforeRun.png)
+![If the app has loaded properly it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/blob/master/Pictures/BeforeRun.png)
 
-![While running it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/tree/master/Pictures/DuringRun.png)
+![While running it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/blob/master/Pictures/DuringRun.png)
