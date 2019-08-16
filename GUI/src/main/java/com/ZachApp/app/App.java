@@ -387,7 +387,7 @@ public class App extends Application {
     HBox keywordsPane = new HBox();
     keywordsPane.setAlignment(Pos.BASELINE_RIGHT);
     Label keywordsLabel = new Label("Keywords:  ");
-    final TextField keywordsInput = new TextField("football, soccer");
+    final TextField keywordsInput = new TextField();
     keywordsPane.getChildren().addAll(keywordsLabel, keywordsInput);
 
     // Set up buttons that will initialize and end the twitter feed analysis
@@ -797,7 +797,7 @@ public class App extends Application {
       Dataset wordCountsDataset = spark.sql("select text, language from TWEET_DATA");
       wordCountsDataset.writeStream()
         .outputMode("append")
-        .trigger(Trigger.ProcessingTime(200L))
+        .trigger(Trigger.ProcessingTime(300L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
           public void call(final Dataset<Row> dataset, final Long batchid) {
             final List<String> allHashtags = new ArrayList<String>();
