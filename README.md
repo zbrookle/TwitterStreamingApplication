@@ -9,3 +9,8 @@ Please not that this uses spark as a backend which is meant to run or a cluster 
 ``` java
 spark = builder.master("local[2]").appName("TwitterStream").getOrCreate();
 ```
+
+# Use
+To build the program use the given build command.
+To run the program use the given run command with ./run. You may have to change this file depending on your platform.
+Note that because this project uses spark, it was built with Java SDK 8. So make sure that your JAVA_HOME is pointing to a distribution of that version of java. ALSO since the project uses JavaFX this project will only work with an Oracle distribution, not with adoptopenjdk8.

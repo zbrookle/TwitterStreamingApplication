@@ -1,1 +1,1 @@
-mvn exec:java -Dexec.mainClass="com.ZachApp.app.App"
+java -cp target/GUI-1.0-SNAPSHOT-jar-with-dependencies.jar com.ZachApp.app.App
