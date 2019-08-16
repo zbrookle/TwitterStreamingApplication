@@ -83,6 +83,9 @@ import org.apache.spark.api.java.function.VoidFunction2;
 import org.apache.log4j.Logger;
 import org.apache.log4j.Level;
 
+// RegExUtils
+import org.apache.commons.lang3.RegExUtils;
+
 /**
  * App is the user interface and main class. It encompasses user input and
  * visuals such as graphs. It is implemented using JavaFX.
@@ -103,6 +106,13 @@ public class App extends Application {
     * Stores the data that goes inside the bar chart.
     */
   private ObservableList<XYChart.Data<String, Double>> barChartData;
+
+  double xPos;
+  double yPos;
+  double screenWidth;
+  double screenHeight;
+  double columnWidth;
+  private TwitterThread twitterThread;
 
   /**
     * Sets the size of various UI elements.
@@ -157,26 +167,7 @@ public class App extends Application {
     }
   }
 
-  @Override
-  public void start(final Stage primaryStage) throws Exception {
-    clearStreamDir(); // Clear the directory so that spark doesn't read old files
-
-
-    // Create a root pane
-    GridPane root = new GridPane();
-
-    // Create an AtomicReference with a string to pass tweets between front and back end
-    final AtomicReference<String> tweetText = new AtomicReference("");
-
-    // Get screen bounds
-    Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
-    final double xPos = screenBounds.getMinX();
-    final double yPos = screenBounds.getMinY();
-    final double screenWidth = screenBounds.getWidth();
-    final double screenHeight = screenBounds.getHeight();// - screenBounds.getHeight() / 25;
-    final double columnWidth = screenWidth / 3;
-
-    /* Chart column */
+  private GridPane createInterfacePane() {
     GridPane chartPane = new GridPane();
     // Add pie chart
     pieChartData = FXCollections.observableArrayList();
@@ -200,7 +191,13 @@ public class App extends Application {
     // Set column size
     setRegionSize(chartPane, columnWidth, screenHeight * .92);
 
-    /* Twitter feed column */
+    return chartPane;
+  }
+
+  private GridPane twitterFeedPane() {
+    // Create an AtomicReference with a string to pass tweets between front and back end
+    final AtomicReference<String> tweetText = new AtomicReference("");
+
     // Set content pane
     final GridPane twitterFeedPane = new GridPane();
     twitterFeedPane.setPrefSize(columnWidth, screenHeight);
@@ -208,15 +205,8 @@ public class App extends Application {
     twitterFeedPane.setMaxWidth(Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxHeight(Region.USE_COMPUTED_SIZE);
 
-    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
-    // Set scrolling pane
-    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
-    setRegionSize(feedScrollPane, columnWidth, screenHeight);
-    feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-    feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-
     tweetCount = 0; // Variable to keep track of tweet row
-    final TwitterThread twitterThread = new TwitterThread();
+    twitterThread = new TwitterThread();
     twitterThread.tweetProperty().addListener(new ChangeListener<String>() {
       @Override
       public void changed(final ObservableValue<? extends String> observable,
@@ -244,15 +234,37 @@ public class App extends Application {
       }
     });
 
-    // An atomic boolean for keeping track between the two interfaces of the
-    // fact that the data has been refreshed.
-    final AtomicBoolean dataRefresh = new AtomicBoolean(true);
+    return twitterFeedPane;
+  }
 
-    // An atomic wrapper to hold the map of language counts from the query.
-    final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
+  @Override
+  public void start(final Stage primaryStage) throws Exception {
+    clearStreamDir(); // Clear the directory so that spark doesn't read old files
 
-    // An atomic wrapper to hold the map of word counts from the tweets.
-    final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
+
+    // Create a root pane
+    GridPane root = new GridPane();
+
+    // Get screen bounds
+    Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
+    xPos = screenBounds.getMinX();
+    yPos = screenBounds.getMinY();
+    screenWidth = screenBounds.getWidth();
+    screenHeight = screenBounds.getHeight();// - screenBounds.getHeight() / 25;
+    columnWidth = screenWidth / 3;
+
+    /* Chart column */
+    final GridPane chartPane = createInterfacePane();
+
+    /* Twitter feed */
+    final GridPane twitterFeedPane = twitterFeedPane();
+
+    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
+    // Set scrolling pane
+    ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
+    setRegionSize(feedScrollPane, columnWidth, screenHeight);
+    feedScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+    feedScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
     // Read in the ISO 639-1 codes for languages from language-codes.csv
     BufferedReader codeReader = new BufferedReader(new FileReader("language-codes.csv"));
@@ -267,6 +279,16 @@ public class App extends Application {
     // Turn off the log messages for spark
     Logger.getLogger("org").setLevel(Level.OFF);
     Logger.getLogger("akka").setLevel(Level.OFF);
+
+    // An atomic boolean for keeping track between the two interfaces of the
+    // fact that the data has been refreshed.
+    final AtomicBoolean dataRefresh = new AtomicBoolean(true);
+
+    // An atomic wrapper to hold the map of language counts from the query.
+    final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
+
+    // An atomic wrapper to hold the map of word counts from the tweets.
+    final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
 
     final SparkThread sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
@@ -668,7 +690,7 @@ public class App extends Application {
 
       // Initialize instance of the spark app
       Builder builder = new Builder();
-      spark = builder.master("local[2]").appName("TwitterStream").getOrCreate();
+      spark = builder.master("local[2]").appName("TwitterStream").getOrCreate(); // Use a small number of logical cores
       spark.sparkContext().setLogLevel("ERROR");
       spark.sparkContext().getConf().set("spark.streaming.stopGracefullyOnShutdown", "true");
 
@@ -748,7 +770,7 @@ public class App extends Application {
                 String[] words = tweetText.split("\\s+");
                 for (int j = 0; j < words.length; j++) {
                     // Replace punctuation and add to map
-                    words[j] = words[j].replaceAll("[^\\w]", "");
+                    words[j] = RegExUtils.replaceAll(words[j], "[^\\w]", ""); // Apache commons replace is more efficient
 
                     // Only add on words that are likely not articles
                     if (words[j].length() > 3) {
