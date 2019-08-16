@@ -490,6 +490,7 @@ public class App extends Application {
 
   @Override
   public void stop() {
+      twitterThread.getEndFeed().set(true);
       twitterThread.stop();
 
       // Terminate spark streams
@@ -557,6 +558,7 @@ public class App extends Application {
         public void onStatus(final Status status) {
             if (endFeed.get()) {
               twitterStream.cleanUp();
+              partition = 0;
             }
 
             // Arrange data in a list
@@ -726,18 +728,14 @@ public class App extends Application {
       */
     private HashMap<String, Double> wordCountsMap;
 
-    // /**
-    //   * Streaming query for the language counts.
-    //   */
-    // private StreamingQuery languageCountsStream;
-    //
-    // /**
-    //   * Streaming query for the word counts.
-    //   */
-    // private StreamingQuery wordCountsStream;
-
+    /**
+      * Atomic wrapper for the language count StreamingQuery.
+      **/
     private AtomicReference<StreamingQuery> atomicLanguageCountsStream;
 
+    /**
+      * Atomic wrapper for the word count StreamingQuery.
+      **/
     private AtomicReference<StreamingQuery> atomicWordCountsStream;
 
     /**
