@@ -342,44 +342,54 @@ public class App extends Application {
     // Create a new thread that runs only spark processes
     sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
 
+    final AtomicBoolean chartsUpdatable = new AtomicBoolean(true);
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
       @Override
       public void changed(final ObservableValue<? extends Boolean> observable,
           final Boolean oldValue, final Boolean newValue) {
-          Platform.runLater(new Runnable() {
-            @Override
-            public void run() {
-              HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
-              for (String key : languageCounts.keySet()) {
-                  String language = languageCodeMap.get(key);
-                  if (language == null) {
-                    addDataPieChart(key, languageCounts.get(key));
-                  } else {
-                    addDataPieChart(language, languageCounts.get(key));
-                  }
-              }
+          if (chartsUpdatable.get()) {
+            // Disable chart update
+            chartsUpdatable.set(false);
 
-              // Get and sort the words by count
-              HashMap<String, Double> wordCounts = atomicWordCounts.get();
-              List<HashMap.Entry<String, Double>> entries =
-                new ArrayList<HashMap.Entry<String, Double>>(wordCounts.entrySet());
-              Collections.sort(entries,
-                               new Comparator<HashMap.Entry<String, Double>>() {
-                                 public int compare(final HashMap.Entry<String, Double> a,
-                                                    final HashMap.Entry<String, Double> b) {
-                                   return Double.compare(a.getValue(), b.getValue());
-                                 }
-                               });
-              Collections.reverse(entries);
-              // Clear the data and add the current top 5 words
-              barChartData.clear();
-              if (entries.size() >= 5) {
-                for (int i = 0; i < 5; i++) {
-                  addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
+            // Schedule update for future
+            Platform.runLater(new Runnable() {
+              @Override
+              public void run() {
+                HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
+                for (String key : languageCounts.keySet()) {
+                    String language = languageCodeMap.get(key);
+                    if (language == null) {
+                      addDataPieChart(key, languageCounts.get(key));
+                    } else {
+                      addDataPieChart(language, languageCounts.get(key));
+                    }
                 }
+
+                // Get and sort the words by count
+                HashMap<String, Double> wordCounts = atomicWordCounts.get();
+                List<HashMap.Entry<String, Double>> entries =
+                  new ArrayList<HashMap.Entry<String, Double>>(wordCounts.entrySet());
+                Collections.sort(entries,
+                                 new Comparator<HashMap.Entry<String, Double>>() {
+                                   public int compare(final HashMap.Entry<String, Double> a,
+                                                      final HashMap.Entry<String, Double> b) {
+                                     return Double.compare(a.getValue(), b.getValue());
+                                   }
+                                 });
+                Collections.reverse(entries);
+                // Clear the data and add the current top 5 words
+                barChartData.clear();
+                if (entries.size() >= 5) {
+                  for (int i = 0; i < 5; i++) {
+                    addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
+                  }
+                }
+
+                // Reenable chart updating
+                chartsUpdatable.set(true);
               }
-            }
-        });
+          });
+        }
       }
     });
     sparkThread.start();
@@ -419,11 +429,14 @@ public class App extends Application {
 
             clearStreamDir();
 
+            tweetCount = 0;
             startFeed.setDisable(true);
             endFeed.setDisable(false);
             instructions.setText("Now streaming Twitter data");
             twitterThread.setKeywords(words);
             twitterThread.start();
+
+            chartsUpdatable.set(true);
           }
         }
     });
@@ -443,7 +456,6 @@ public class App extends Application {
           }
 
           // Clear feed
-          tweetCount = 0;
           instructions.setText(instructionText);
         }
     });
