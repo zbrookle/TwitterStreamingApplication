@@ -71,6 +71,7 @@ import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.SparkSession.Builder;
 import org.apache.spark.sql.streaming.StreamingQueryException;
 import org.apache.spark.sql.streaming.StreamingQuery;
+import org.apache.spark.sql.streaming.DataStreamWriter;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.DataTypes;
@@ -329,71 +330,6 @@ public class App extends Application {
     Logger.getLogger("org").setLevel(Level.OFF);
     Logger.getLogger("akka").setLevel(Level.OFF);
 
-    // An atomic boolean for keeping track between the two interfaces of the
-    // fact that the data has been refreshed.
-    final AtomicBoolean dataRefresh = new AtomicBoolean(true);
-
-    // An atomic wrapper to hold the map of language counts from the query.
-    final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
-
-    // An atomic wrapper to hold the map of word counts from the tweets.
-    final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
-
-    // Create a new thread that runs only spark processes
-    sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
-
-    final AtomicBoolean chartsUpdatable = new AtomicBoolean(true);
-    sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
-      @Override
-      public void changed(final ObservableValue<? extends Boolean> observable,
-          final Boolean oldValue, final Boolean newValue) {
-          if (chartsUpdatable.get()) {
-            // Disable chart update
-            chartsUpdatable.set(false);
-
-            // Schedule update for future
-            Platform.runLater(new Runnable() {
-              @Override
-              public void run() {
-                HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
-                for (String key : languageCounts.keySet()) {
-                    String language = languageCodeMap.get(key);
-                    if (language == null) {
-                      addDataPieChart(key, languageCounts.get(key));
-                    } else {
-                      addDataPieChart(language, languageCounts.get(key));
-                    }
-                }
-
-                // Get and sort the words by count
-                HashMap<String, Double> wordCounts = atomicWordCounts.get();
-                List<HashMap.Entry<String, Double>> entries =
-                  new ArrayList<HashMap.Entry<String, Double>>(wordCounts.entrySet());
-                Collections.sort(entries,
-                                 new Comparator<HashMap.Entry<String, Double>>() {
-                                   public int compare(final HashMap.Entry<String, Double> a,
-                                                      final HashMap.Entry<String, Double> b) {
-                                     return Double.compare(a.getValue(), b.getValue());
-                                   }
-                                 });
-                Collections.reverse(entries);
-                // Clear the data and add the current top 5 words
-                barChartData.clear();
-                if (entries.size() >= 5) {
-                  for (int i = 0; i < 5; i++) {
-                    addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
-                  }
-                }
-
-                // Reenable chart updating
-                chartsUpdatable.set(true);
-              }
-          });
-        }
-      }
-    });
-    sparkThread.start();
-
     /* Interface Column */
     double inputPaneVerticalSpacing = screenHeight / 100;
     VBox inputPane = new VBox(inputPaneVerticalSpacing);
@@ -410,6 +346,7 @@ public class App extends Application {
     // Set up buttons that will initialize and end the twitter feed analysis
     final Button startFeed = new Button("Start Twitter Feed");
     final Button endFeed = new Button("End Twitter Feed");
+    final AtomicBoolean chartsUpdatable = new AtomicBoolean(true);
     endFeed.setDisable(true);
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
@@ -418,8 +355,8 @@ public class App extends Application {
             String[] words = keywordsInput.getText().split(",");
 
             // Clear bar and pie chart and corresponding data
-            atomicLanguageCounts.get().clear();
-            atomicWordCounts.get().clear();
+            // atomicLanguageCounts.get().clear();
+            // atomicWordCounts.get().clear();
             pieChartData.clear();
             barChartData.clear();
 
@@ -437,6 +374,73 @@ public class App extends Application {
             twitterThread.start();
 
             chartsUpdatable.set(true);
+
+            // An atomic boolean for keeping track between the two interfaces of the
+            // fact that the data has been refreshed.
+            final AtomicBoolean dataRefresh = new AtomicBoolean(true);
+
+            // An atomic wrapper to hold the map of language counts from the query.
+            final AtomicReference<HashMap> atomicLanguageCounts = new AtomicReference(new HashMap<String, Double>());
+
+            // An atomic wrapper to hold the map of word counts from the tweets.
+            final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
+
+            // Create a new thread that runs only spark processes
+            try {
+              sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
+            } catch (StreamingQueryException e) {
+              System.out.println("StreamingQueryException!");
+            }
+            sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
+              @Override
+              public void changed(final ObservableValue<? extends Boolean> observable,
+                  final Boolean oldValue, final Boolean newValue) {
+                  if (chartsUpdatable.get()) {
+                    // Disable chart update
+                    chartsUpdatable.set(false);
+
+                    // Schedule update for future
+                    Platform.runLater(new Runnable() {
+                      @Override
+                      public void run() {
+                        HashMap<String, Double> languageCounts = atomicLanguageCounts.get();
+                        for (String key : languageCounts.keySet()) {
+                            String language = languageCodeMap.get(key);
+                            if (language == null) {
+                              addDataPieChart(key, languageCounts.get(key));
+                            } else {
+                              addDataPieChart(language, languageCounts.get(key));
+                            }
+                        }
+
+                        // Get and sort the words by count
+                        HashMap<String, Double> wordCounts = atomicWordCounts.get();
+                        List<HashMap.Entry<String, Double>> entries =
+                          new ArrayList<HashMap.Entry<String, Double>>(wordCounts.entrySet());
+                        Collections.sort(entries,
+                                         new Comparator<HashMap.Entry<String, Double>>() {
+                                           public int compare(final HashMap.Entry<String, Double> a,
+                                                              final HashMap.Entry<String, Double> b) {
+                                             return Double.compare(a.getValue(), b.getValue());
+                                           }
+                                         });
+                        Collections.reverse(entries);
+                        // Clear the data and add the current top 5 words
+                        barChartData.clear();
+                        if (entries.size() >= 5) {
+                          for (int i = 0; i < 5; i++) {
+                            addDataBarChart(entries.get(i).getKey(), entries.get(i).getValue());
+                          }
+                        }
+
+                        // Reenable chart updating
+                        chartsUpdatable.set(true);
+                      }
+                  });
+                }
+              }
+            });
+            sparkThread.start();
           }
         }
     });
@@ -447,6 +451,9 @@ public class App extends Application {
           startFeed.setDisable(false);
           endFeed.setDisable(true);
           twitterThread.getEndFeed().getAndSet(true);
+
+          sparkThread.atomicWordCountsStream().get().stop();
+          sparkThread.atomicLanguageCountsStream().get().stop();
 
           // Put the UI thread to sleep to allow for twitter to stop
           try {
@@ -814,7 +821,7 @@ public class App extends Application {
 
       Dataset languageCountsDataSet = spark.sql(languageQuery);
 
-      final StreamingQuery languageCountsStream = languageCountsDataSet.writeStream()
+      final DataStreamWriter languageCountsStreamWriter = languageCountsDataSet.writeStream()
         .outputMode("complete")
         .trigger(Trigger.ProcessingTime(200L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
@@ -828,10 +835,12 @@ public class App extends Application {
               atomicLanguageCounts.set(languageCountsMap); // Set the atomic variable
             }
           }
-        }).start();
+        }
+      );
+      final StreamingQuery languageCountsStream = languageCountsStreamWriter.start();
 
       Dataset wordCountsDataset = spark.sql("select text, language from TWEET_DATA");
-      final StreamingQuery wordCountsStream = wordCountsDataset.writeStream()
+      final DataStreamWriter wordCountsStreamWriter = wordCountsDataset.writeStream()
         .outputMode("append")
         .trigger(Trigger.ProcessingTime(300L))
         .foreachBatch(new VoidFunction2<Dataset<Row>, Long>() {
@@ -864,7 +873,8 @@ public class App extends Application {
               }
             }
           }
-        }).start();
+        });
+        final StreamingQuery wordCountsStream = wordCountsStreamWriter.start();
         atomicWordCountsStream = new AtomicReference<StreamingQuery>();
         atomicLanguageCountsStream = new AtomicReference<StreamingQuery>();
         atomicWordCountsStream.set(wordCountsStream);
