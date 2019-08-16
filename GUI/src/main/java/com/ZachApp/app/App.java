@@ -141,7 +141,7 @@ public class App extends Application {
   /**
     * The gridpane where the twitter feed is displayed.
     */
-  public GridPane twitterFeedPane;
+  private GridPane twitterFeedPane;
 
   /**
     * Sets the size of various UI elements.
@@ -186,7 +186,7 @@ public class App extends Application {
   }
 
   /**
-    * Clears the stream files currently in the stream directory
+    * Clears the stream files currently in the stream directory.
     **/
   private void clearStreamDir() {
     for (File file: new File("stream").listFiles()) {
@@ -196,7 +196,11 @@ public class App extends Application {
     }
   }
 
-  private GridPane createInterfacePane() {
+  /**
+    * Generates the pane where all charts are displayed and updated.
+    * @return chartPane the pane containing the charts
+    **/
+  private GridPane createChartPane() {
     GridPane chartPane = new GridPane();
     // Add pie chart
     pieChartData = FXCollections.observableArrayList();
@@ -223,6 +227,10 @@ public class App extends Application {
     return chartPane;
   }
 
+  /**
+    * Generates the pane where the twitter feed is displayed.
+    * @return twitterFeedPane the pane displaying the twitter feed
+    **/
   private ScrollPane twitterFeedPane() {
     // Create an AtomicReference with a string to pass tweets between front and back end
     final AtomicReference<String> tweetText = new AtomicReference("");
@@ -292,11 +300,11 @@ public class App extends Application {
     xPos = screenBounds.getMinX();
     yPos = screenBounds.getMinY();
     screenWidth = screenBounds.getWidth();
-    screenHeight = screenBounds.getHeight();// - screenBounds.getHeight() / 25;
+    screenHeight = screenBounds.getHeight();
     columnWidth = screenWidth / 3;
 
     /* Chart column */
-    final GridPane chartPane = createInterfacePane();
+    final GridPane chartPane = createChartPane();
 
     /* Twitter feed */
     final ScrollPane feedScrollPane = twitterFeedPane();
@@ -498,9 +506,6 @@ public class App extends Application {
 
     /**
       * Constructor for the TwitterThread class.
-      * @param currentTweetText is a string property with the text of the current tweet
-      * @param endFeed is an atomic boolean that receives from the UI when to
-      * terminate the stream
       */
     public TwitterThread() {
       tweetProperty = new SimpleStringProperty(this, "string", "");
@@ -622,14 +627,14 @@ public class App extends Application {
 
     /**
       * Method that begins the streaming process.
-      * @param keywords is an array of key words to look for in tweets
+      * @param inputKeywords is an array of key words to look for in tweets
       */
-    public void streamData(final String[] keywords) {
+    public void streamData(final String[] inputKeywords) {
       // Create a new filter instance
       FilterQuery tweetFilterQuery = new FilterQuery();
 
       // Add the keywords to the query
-      tweetFilterQuery.track(keywords);
+      tweetFilterQuery.track(inputKeywords);
 
       // Start the stream
       twitterStream.filter(tweetFilterQuery);
@@ -711,7 +716,7 @@ public class App extends Application {
       * @param languageCounts atomic reference to language counts
       * @param dataRefresh atomic reference to boolean controlling UI refresh
       * @param wordCounts atomic reference to word count map
-      * @throws StreamingQueryException
+      * @throws StreamingQueryException because it has a streaming query
       */
     public SparkThread(final AtomicReference<HashMap> languageCounts,
                        final AtomicBoolean dataRefresh,
@@ -804,7 +809,8 @@ public class App extends Application {
                 String[] words = tweetText.split("\\s+");
                 for (int j = 0; j < words.length; j++) {
                     // Replace punctuation and add to map
-                    words[j] = RegExUtils.replaceAll(words[j], "[^\\w]", ""); // Apache commons replace is more efficient
+                    words[j] = RegExUtils.replaceAll(words[j], "[^\\w]", "");
+                    //                    ^^^^ Apache commons replace is more efficient
 
                     // Only add on words that are likely not articles
                     if (words[j].length() > 3) {
