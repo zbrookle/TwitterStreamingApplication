@@ -16,7 +16,7 @@ To run the program use the given run command with ./run. You may have to change 
 Note that because this project uses spark, it was built with Java SDK 8. So make sure that your JAVA_HOME is pointing to a distribution of that version of java. ALSO since the project uses JavaFX this project will only work with an Oracle distribution, not with adoptopenjdk8.
 
 # Twitter Connection
-The application also requires a twitter4j.properties file to be placed in the directory with the following format. You can get these by registering an application on the twitter developer site. 
+The application also requires a twitter4j.properties file to be placed in the directory with the following format. You can get these by registering an application on the twitter developer site.
 ```
 debug=false
 oauth.consumerKey=xxxxxxxxxxxxxxxx
@@ -24,3 +24,10 @@ oauth.consumerSecret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 oauth.accessToken=xxxxxxxxxxxxxxxx
 oauth.accessTokenSecret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+# Interface
+
+
+![If the app has loaded properly it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/tree/master/Pictures/BeforeRun.png)
+
+![While running it looks like this.](https://github.com/zbrookle/TwitterStreamingApplication/tree/master/Pictures/DuringRun.png)
