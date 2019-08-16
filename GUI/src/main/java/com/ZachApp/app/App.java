@@ -134,10 +134,13 @@ public class App extends Application {
   private double columnWidth;
 
   /**
-    * The thread that handle interactions with twitter.
+    * The thread that handles interactions with twitter.
     */
   private TwitterThread twitterThread;
 
+  /**
+    * The thread that handles interactions with spark.
+    */
   private SparkThread sparkThread;
 
   /**
@@ -224,7 +227,7 @@ public class App extends Application {
     barchart.getData().add(wordCounts);
 
     // Set column size
-    setRegionSize(chartPane, columnWidth, screenHeight * .92);
+    setRegionSize(chartPane, columnWidth * 4 / 3, screenHeight * .92);
 
     return chartPane;
   }
@@ -336,7 +339,9 @@ public class App extends Application {
     // An atomic wrapper to hold the map of word counts from the tweets.
     final AtomicReference<HashMap> atomicWordCounts = new AtomicReference(new HashMap<String, Double>());
 
+    // Create a new thread that runs only spark processes
     sparkThread = new SparkThread(atomicLanguageCounts, dataRefresh, atomicWordCounts);
+
     sparkThread.dataRefreshProperty().addListener(new ChangeListener<Boolean>() {
       @Override
       public void changed(final ObservableValue<? extends Boolean> observable,
@@ -399,25 +404,27 @@ public class App extends Application {
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
-          String[] words = keywordsInput.getText().split(",");
+          if (!(keywordsInput.getText() == null || keywordsInput.getText().trim().isEmpty())) {
+            String[] words = keywordsInput.getText().split(",");
 
-          // Clear bar and pie chart and corresponding data
-          atomicLanguageCounts.get().clear();
-          atomicWordCounts.get().clear();
-          pieChartData.clear();
-          barChartData.clear();
+            // Clear bar and pie chart and corresponding data
+            atomicLanguageCounts.get().clear();
+            atomicWordCounts.get().clear();
+            pieChartData.clear();
+            barChartData.clear();
 
-          // Clear tweets from feed
-          twitterFeedPane.getChildren().clear();
-          twitterFeedPane.setPrefHeight(screenHeight);
+            // Clear tweets from feed
+            twitterFeedPane.getChildren().clear();
+            twitterFeedPane.setPrefHeight(screenHeight);
 
-          clearStreamDir();
+            clearStreamDir();
 
-          startFeed.setDisable(true);
-          endFeed.setDisable(false);
-          instructions.setText("Now streaming Twitter data");
-          twitterThread.setKeywords(words);
-          twitterThread.start();
+            startFeed.setDisable(true);
+            endFeed.setDisable(false);
+            instructions.setText("Now streaming Twitter data");
+            twitterThread.setKeywords(words);
+            twitterThread.start();
+          }
         }
     });
 
@@ -440,7 +447,7 @@ public class App extends Application {
           instructions.setText(instructionText);
         }
     });
-    setRegionSize(inputPane, columnWidth, screenHeight);
+    setRegionSize(inputPane, columnWidth * 2 / 3, screenHeight);
     inputPane.getChildren().addAll(instructions, keywordsPane, startFeed, endFeed);
 
     // Add panes to the root
@@ -464,9 +471,9 @@ public class App extends Application {
 
   @Override
   public void stop() {
-
       twitterThread.stop();
 
+      // Terminate spark streams
       sparkThread.atomicWordCountsStream().get().stop();
       sparkThread.atomicLanguageCountsStream().get().stop();
       sparkThread.stop();
