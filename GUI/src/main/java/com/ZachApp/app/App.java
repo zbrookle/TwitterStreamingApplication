@@ -887,10 +887,18 @@ public class App extends Application {
       return dataRefreshProperty;
     }
 
+    /**
+      * Get method for atomicWordCountsStream.
+      * @return atomicWordCountsStream
+      **/
     public AtomicReference<StreamingQuery> atomicWordCountsStream() {
       return atomicWordCountsStream;
     }
 
+    /**
+      * Get method for atomicLanguageCountsStream.
+      * @return atomicLanguageCountsStream
+      **/
     public AtomicReference<StreamingQuery> atomicLanguageCountsStream() {
       return atomicLanguageCountsStream;
     }
