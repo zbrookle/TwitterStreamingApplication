@@ -291,6 +291,7 @@ public class App extends Application {
   public void start(final Stage primaryStage) throws Exception {
     clearStreamDir(); // Clear the directory so that spark doesn't read old files
 
+    final String instructionText = "Please enter keywords, separated by commas";
 
     // Create a root pane
     GridPane root = new GridPane();
@@ -381,12 +382,12 @@ public class App extends Application {
     VBox inputPane = new VBox(inputPaneVerticalSpacing);
     inputPane.setAlignment(Pos.BASELINE_RIGHT);
 
-    final Label instructions = new Label("Please enter keywords");
+    final Label instructions = new Label(instructionText);
 
     HBox keywordsPane = new HBox();
     keywordsPane.setAlignment(Pos.BASELINE_RIGHT);
     Label keywordsLabel = new Label("Keywords:  ");
-    final TextField keywordsInput = new TextField("football");
+    final TextField keywordsInput = new TextField("football, soccer");
     keywordsPane.getChildren().addAll(keywordsLabel, keywordsInput);
 
     // Set up buttons that will initialize and end the twitter feed analysis
@@ -396,7 +397,7 @@ public class App extends Application {
     startFeed.setOnAction(new EventHandler<ActionEvent>() {
         @Override
         public void handle(final ActionEvent arg0) {
-          String[] words = new String[]{keywordsInput.getText()};
+          String[] words = keywordsInput.getText().split(",");
 
           // Clear bar and pie chart and corresponding data
           atomicLanguageCounts.get().clear();
@@ -434,7 +435,7 @@ public class App extends Application {
 
           // Clear feed
           tweetCount = 0;
-          instructions.setText("Please enter keywords");
+          instructions.setText(instructionText);
         }
     });
     setRegionSize(inputPane, columnWidth, screenHeight);
@@ -814,7 +815,7 @@ public class App extends Application {
 
                     // Only add on words that are likely not articles
                     if (words[j].length() > 3) {
-                      addToWordMap(words[j]);
+                      addToWordMap(words[j].toLowerCase());
                     }
                 }
                 atomicWordCounts.set(wordCountsMap);

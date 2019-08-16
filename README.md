@@ -1,10 +1,5 @@
 # TwitterStreamingApplication
-A simple application with an HTML UI that allows users to view and filter current tweets. This application is built using HTML5 and with a scala based spark backend.
+A simple application with a JavaFX UI that allows users to view and filter live tweets. This application is built using JavaFX with spark and twitter4j backend.
 
 # Dependencies
-The dependencies for this project include spark, scala, python and PubNub as a data streaming source.
-
-To install the PubNub package for importing data through python:
-``` bash
-pip install 'pubnub>=4.1.4'
-```
+The dependencies for this project include spark, scala, and twitter4j. See the pom.xml for more details on dependencies and build.
