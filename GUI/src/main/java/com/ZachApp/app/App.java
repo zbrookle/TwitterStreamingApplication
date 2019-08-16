@@ -107,13 +107,41 @@ public class App extends Application {
     */
   private ObservableList<XYChart.Data<String, Double>> barChartData;
 
-  double xPos;
-  double yPos;
-  double screenWidth;
-  double screenHeight;
-  double columnWidth;
+
+  /**
+    * Stores the x position of the window.
+    */
+  private double xPos;
+
+  /**
+    * Stores the y position of the window.
+    */
+  private double yPos;
+
+  /**
+    * The width of the screen.
+    */
+  private double screenWidth;
+
+  /**
+    * The height of the screen.
+    */
+  private double screenHeight;
+
+  /**
+    * The standard width accross each section of the interface.
+    */
+  private double columnWidth;
+
+  /**
+    * The thread that handle interactions with twitter.
+    */
   private TwitterThread twitterThread;
-  private GridPane twitterFeedPane;
+
+  /**
+    * The gridpane where the twitter feed is displayed.
+    */
+  public GridPane twitterFeedPane;
 
   /**
     * Sets the size of various UI elements.
@@ -206,7 +234,6 @@ public class App extends Application {
     twitterFeedPane.setMaxWidth(Control.USE_PREF_SIZE);
     twitterFeedPane.setMaxHeight(Region.USE_COMPUTED_SIZE);
 
-    // TODO add in scroll pane going down when new tweet if scrolled down to bottom
     // Set scrolling pane
     final ScrollPane feedScrollPane = new ScrollPane(twitterFeedPane);
     setRegionSize(feedScrollPane, columnWidth, screenHeight);
@@ -371,6 +398,7 @@ public class App extends Application {
 
           // Clear tweets from feed
           twitterFeedPane.getChildren().clear();
+          twitterFeedPane.setPrefHeight(screenHeight);
 
           clearStreamDir();
 
@@ -403,8 +431,6 @@ public class App extends Application {
     });
     setRegionSize(inputPane, columnWidth, screenHeight);
     inputPane.getChildren().addAll(instructions, keywordsPane, startFeed, endFeed);
-
-    // TODO Still need to add in a menu for the top bar
 
     // Add panes to the root
     root.addColumn(0, inputPane);
