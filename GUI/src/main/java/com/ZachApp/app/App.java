@@ -295,6 +295,12 @@ public class App extends Application {
 
   @Override
   public void start(final Stage primaryStage) throws Exception {
+    // Create the stream directory if it doesn't exist
+    File directory = new File("stream");
+    if (!directory.exists()){
+        directory.mkdir();
+    }
+
     clearStreamDir(); // Clear the directory so that spark doesn't read old files
 
     final String instructionText = "Please enter keywords, separated by commas";
